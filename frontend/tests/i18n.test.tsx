@@ -27,6 +27,8 @@ import { OAuthModal } from '../src/components/OAuthModal';
 import { NewSessionModal } from '../src/components/NewSessionModal';
 import { StorageWizardModal } from '../src/components/StorageWizardModal';
 import { SSHHelperModal } from '../src/components/SSHHelperModal';
+import { SnapshotModal } from '../src/components/SnapshotModal';
+import { StopSessionModal } from '../src/components/StopSessionModal';
 import { LoginPage } from '../src/pages/LoginPage';
 import { OverviewPage } from '../src/pages/OverviewPage';
 import { AccountsPage } from '../src/pages/AccountsPage';
@@ -582,5 +584,78 @@ test('Accelerator catalog and high-RAM auto-adjustment helpers cover all 8 offic
   );
   for (const accId of ACCELERATOR_IDS) {
     assert.ok(modalsEn.includes(`${accId} — `), `Missing accelerator ${accId} in English NewSessionModal`);
+  }
+});
+
+test('Environment snapshot modals, tabs, and stop-or-save prompt render in both locales', () => {
+  const sampleSession = {
+    id: 'sess_snap_1',
+    name: 'snap-worker',
+    account_id: 'acc_1',
+    account_email: 'user@example.com',
+    notebook_hash: 'nb1',
+    endpoint: 'ep1',
+    proxy_url: 'https://proxy',
+    accelerator: 'T4',
+    shape: 'standard',
+    lifecycle_policy: 'interactive' as const,
+    idle_timeout_sec: 1800,
+    workspace_subpath: '',
+    remote_workdir: '/content',
+    status: 'READY' as const,
+    created_at: '2026-11-14 00:00:00',
+  };
+
+  const snapshotUiZh = renderToStaticMarkup(
+    <I18nProvider initialLocale="zh">
+      <div>
+        <SessionWorkbenchPage session={sampleSession} onBack={() => {}} onStop={async () => {}} />
+        <SnapshotModal session={sampleSession} onClose={() => {}} />
+        <StopSessionModal
+          session={sampleSession}
+          onSaveAndStop={() => {}}
+          onStopDirectly={() => {}}
+          onClose={() => {}}
+        />
+        <TemplatesPage initialTab="snapshots" />
+      </div>
+    </I18nProvider>
+  );
+
+  for (const expectedZh of [
+    '环境快照',
+    '实例环境快照管理',
+    '包含 Python 库二进制（免重装）',
+    '保存完成后自动停止当前实例',
+    '保存快照并停止实例',
+    '直接停止并销毁',
+    '同步网盘快照',
+  ]) {
+    assert.ok(snapshotUiZh.includes(expectedZh), `Missing Chinese snapshot UI string: ${expectedZh}`);
+  }
+
+  const snapshotUiEn = renderToStaticMarkup(
+    <I18nProvider initialLocale="en">
+      <div>
+        <SnapshotModal session={sampleSession} onClose={() => {}} />
+        <StopSessionModal
+          session={sampleSession}
+          onSaveAndStop={() => {}}
+          onStopDirectly={() => {}}
+          onClose={() => {}}
+        />
+        <TemplatesPage initialTab="snapshots" />
+      </div>
+    </I18nProvider>
+  );
+
+  for (const expectedEn of [
+    'Instance Environment Snapshots',
+    'Include Python library binaries (skip pip reinstall on matching Python)',
+    'Save Snapshot &amp; Stop Instance',
+    'Stop &amp; Destroy Directly',
+    'Sync from Drive',
+  ]) {
+    assert.ok(snapshotUiEn.includes(expectedEn), `Missing English snapshot UI string: ${expectedEn}`);
   }
 });

@@ -25,6 +25,8 @@ const AppContent: React.FC = () => {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [oauthFlow, setOauthFlow] = useState<{ authUrl: string; state?: string } | null>(null);
   const [showNewSessionModal, setShowNewSessionModal] = useState<boolean>(false);
+  const [initialSnapshotId, setInitialSnapshotId] = useState<string | undefined>(undefined);
+  const [autoRestoreSnapshotId, setAutoRestoreSnapshotId] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [isSyncingAccounts, setIsSyncingAccounts] = useState<boolean>(false);
   const syncingAccountsRef = useRef<boolean>(false);
@@ -123,10 +125,13 @@ const AppContent: React.FC = () => {
     shape: string;
     lifecycle_policy: string;
     account_id?: string;
+    template_id?: string;
+    snapshot_id?: string;
   }) => {
     const sess = await api.createSession(params);
     await refreshData();
     void syncPoolAccounts(true);
+    setAutoRestoreSnapshotId(params.snapshot_id || null);
     setSelectedSession(sess);
   };
 
@@ -147,7 +152,13 @@ const AppContent: React.FC = () => {
     return (
       <SessionWorkbenchPage
         session={selectedSession}
-        onBack={() => setSelectedSession(null)}
+        autoRestoreSnapshotId={autoRestoreSnapshotId}
+        onClearAutoRestore={() => setAutoRestoreSnapshotId(null)}
+        onBack={() => {
+          setSelectedSession(null);
+          setAutoRestoreSnapshotId(null);
+          void refreshData();
+        }}
         onStop={handleStopSession}
       />
     );
@@ -196,7 +207,15 @@ const AppContent: React.FC = () => {
           />
         )}
 
-        {activePage === 'templates' && <TemplatesPage />}
+        {activePage === 'templates' && (
+          <TemplatesPage
+            sessions={sessions}
+            onLaunchFromSnapshot={(snap) => {
+              setInitialSnapshotId(snap.id);
+              setShowNewSessionModal(true);
+            }}
+          />
+        )}
 
         {activePage === 'notifications' && <NotificationsPage />}
       </main>
@@ -212,8 +231,12 @@ const AppContent: React.FC = () => {
       {showNewSessionModal && (
         <NewSessionModal
           accounts={accounts}
+          initialSnapshotId={initialSnapshotId}
           onLaunch={handleLaunchSession}
-          onClose={() => setShowNewSessionModal(false)}
+          onClose={() => {
+            setShowNewSessionModal(false);
+            setInitialSnapshotId(undefined);
+          }}
         />
       )}
     </div>

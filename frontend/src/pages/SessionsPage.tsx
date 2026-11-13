@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Play, Square, ExternalLink, Terminal } from 'lucide-react';
 import { Session } from '../types';
+import { StopSessionModal } from '../components/StopSessionModal';
+import { SnapshotModal } from '../components/SnapshotModal';
 import { useI18n } from '../i18n';
 
 interface Props {
@@ -21,6 +23,8 @@ export const SessionsPage: React.FC<Props> = ({
   const { t, formatActionError, formatSessionStatus, formatShape } = useI18n();
   const [filter, setFilter] = useState<'all' | 'active' | 'stopped'>('all');
   const [stoppingId, setStoppingId] = useState<string | null>(null);
+  const [stopTarget, setStopTarget] = useState<Session | null>(null);
+  const [snapshotSaveTarget, setSnapshotSaveTarget] = useState<Session | null>(null);
 
   const filteredSessions = sessions.filter((s) => {
     if (filter === 'active') return s.status !== 'STOPPED' && s.status !== 'FAILED';
@@ -28,10 +32,7 @@ export const SessionsPage: React.FC<Props> = ({
     return true;
   });
 
-  const handleStop = async (sessionId: string) => {
-    if (!confirm(t('sessions.confirmStop'))) {
-      return;
-    }
+  const handleStopDirect = async (sessionId: string) => {
     setStoppingId(sessionId);
     try {
       await onStopSession(sessionId);
@@ -173,7 +174,7 @@ export const SessionsPage: React.FC<Props> = ({
                             </button>
                             <button
                               type="button"
-                              onClick={() => handleStop(sess.id)}
+                              onClick={() => setStopTarget(sess)}
                               disabled={stoppingId === sess.id}
                               title={t('sessions.stopTooltip')}
                               className="px-2.5 py-1 bg-red-950/60 hover:bg-red-900 border border-red-800/60 rounded text-xs text-red-300 transition"
@@ -191,6 +192,37 @@ export const SessionsPage: React.FC<Props> = ({
           </div>
         )}
       </div>
+
+      {stopTarget && (
+        <StopSessionModal
+          session={stopTarget}
+          onSaveAndStop={() => {
+            const target = stopTarget;
+            setStopTarget(null);
+            setSnapshotSaveTarget(target);
+          }}
+          onStopDirectly={async () => {
+            const target = stopTarget;
+            setStopTarget(null);
+            await handleStopDirect(target.id);
+          }}
+          onClose={() => setStopTarget(null)}
+        />
+      )}
+
+      {snapshotSaveTarget && (
+        <SnapshotModal
+          session={snapshotSaveTarget}
+          initialTab="save"
+          initialStopAfterSave={true}
+          onCompleted={async (task) => {
+            if (task.status === 'COMPLETED') {
+              await onRefresh();
+            }
+          }}
+          onClose={() => setSnapshotSaveTarget(null)}
+        />
+      )}
     </div>
   );
 };

@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     workspace_subpath TEXT NOT NULL DEFAULT '',
     remote_workdir TEXT NOT NULL DEFAULT '/content',
     template_id TEXT,
+    snapshot_id TEXT,
     status TEXT NOT NULL DEFAULT 'PROVISIONING', -- PROVISIONING, BOOTSTRAPPING, READY, BUSY, ORPHAN, STOPPED, LOST, FAILED
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     stopped_at TIMESTAMP,
@@ -133,6 +134,29 @@ CREATE TABLE IF NOT EXISTS notification_channels (
     enabled BOOLEAN NOT NULL DEFAULT 1
 );
 
+-- Snapshots Table: Colab environment snapshots stored in Google Drive
+CREATE TABLE IF NOT EXISTS snapshots (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    account_id TEXT NOT NULL,
+    source_session_id TEXT,
+    capture_mode TEXT NOT NULL DEFAULT 'hybrid', -- hybrid, full_binary
+    drive_folder_path TEXT NOT NULL,
+    python_version TEXT NOT NULL DEFAULT '',
+    accelerator TEXT NOT NULL DEFAULT 'T4',
+    shape TEXT NOT NULL DEFAULT 'standard',
+    apt_package_count INTEGER NOT NULL DEFAULT 0,
+    pip_package_count INTEGER NOT NULL DEFAULT 0,
+    workspace_size_bytes INTEGER NOT NULL DEFAULT 0,
+    pylibs_size_bytes INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'CREATING', -- CREATING, READY, FAILED
+    error_message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+);
+
 -- Performance & Foreign Key Indexes
 CREATE INDEX IF NOT EXISTS idx_sessions_account_id ON sessions(account_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
@@ -140,6 +164,8 @@ CREATE INDEX IF NOT EXISTS idx_jobs_session_id ON jobs(session_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_telemetry_session_ts ON telemetry_samples(session_id, ts);
 CREATE INDEX IF NOT EXISTS idx_accounts_status ON accounts(status);
+CREATE INDEX IF NOT EXISTS idx_snapshots_account_id ON snapshots(account_id);
+CREATE INDEX IF NOT EXISTS idx_snapshots_status ON snapshots(status);
 """
 
 
@@ -172,6 +198,10 @@ def init_db(db_path: Optional[str] = None) -> None:
         job_cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
         if "target_shape" not in job_cols:
             conn.execute("ALTER TABLE jobs ADD COLUMN target_shape TEXT NOT NULL DEFAULT 'standard'")
+
+        session_cols = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
+        if "snapshot_id" not in session_cols:
+            conn.execute("ALTER TABLE sessions ADD COLUMN snapshot_id TEXT")
 
         # Ensure High-RAM-only accelerators (L4, V5E1, V6E1) reflect 'hm' in local records
         conn.execute(

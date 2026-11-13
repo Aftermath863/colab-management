@@ -96,6 +96,7 @@ class SessionCreateRequest(BaseModel):
     idle_timeout_sec: int = 1800
     account_id: Optional[str] = None
     template_id: Optional[str] = None
+    snapshot_id: Optional[str] = None
     workspace_subpath: Optional[str] = ""
     remote_workdir: Optional[str] = "/content"
 
@@ -129,6 +130,7 @@ class SessionSummary(BaseModel):
     workspace_subpath: str
     remote_workdir: str
     template_id: Optional[str] = None
+    snapshot_id: Optional[str] = None
     status: SessionStatus
     created_at: str
     stopped_at: Optional[str] = None
@@ -416,3 +418,57 @@ class OAuthCompleteRequest(BaseModel):
 
 class ColabUrlResponse(BaseModel):
     url: str
+
+
+# --- Environment Snapshot Models ---
+
+SnapshotMode = Literal["hybrid", "full_binary"]
+SnapshotStatus = Literal["CREATING", "READY", "FAILED"]
+
+
+class SnapshotSaveRequest(BaseModel):
+    name: str
+    description: str = ""
+    capture_mode: SnapshotMode = "hybrid"
+    overwrite_snapshot_id: Optional[str] = None
+    stop_after_save: bool = False
+
+
+class SnapshotRestoreRequest(BaseModel):
+    snapshot_id: str
+
+
+class SnapshotSyncRequest(BaseModel):
+    session_id: str
+
+
+class SnapshotResponse(BaseModel):
+    id: str
+    name: str
+    description: str = ""
+    account_id: str
+    account_email: Optional[str] = None
+    source_session_id: Optional[str] = None
+    capture_mode: SnapshotMode = "hybrid"
+    drive_folder_path: str
+    python_version: str = ""
+    accelerator: str = "T4"
+    shape: str = "standard"
+    apt_package_count: int = 0
+    pip_package_count: int = 0
+    workspace_size_bytes: int = 0
+    pylibs_size_bytes: int = 0
+    status: SnapshotStatus = "CREATING"
+    error_message: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class SnapshotActionResponse(BaseModel):
+    action_status: Literal["AUTH_REQUIRED", "STARTED", "SYNCED", "ERROR"]
+    redirect_url: Optional[str] = None
+    snapshot: Optional[SnapshotResponse] = None
+    snapshots: Optional[List[SnapshotResponse]] = None
+    task: Optional[Dict[str, Any]] = None
+    message: Optional[str] = None
+

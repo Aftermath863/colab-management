@@ -62,8 +62,23 @@ def create_session(
     """Provision a new Colab runtime session and persist to database."""
     colab = client or ColabClient()
 
-    # 1. Resolve Account
-    account_id = account_pool.select_account(req.account_id)
+    # 1. Resolve Account (enforce snapshot owner binding when restoring from snapshot)
+    preferred_account_id = req.account_id
+    if req.snapshot_id:
+        with get_db() as conn:
+            snap = conn.execute(
+                "SELECT id, account_id, status FROM snapshots WHERE id = ?",
+                (req.snapshot_id,),
+            ).fetchone()
+        if not snap:
+            raise ValueError(f"Snapshot {req.snapshot_id} not found")
+        if snap["status"] != "READY":
+            raise ValueError(f"Snapshot {req.snapshot_id} is not ready (status: {snap['status']})")
+        if preferred_account_id and preferred_account_id != snap["account_id"]:
+            raise ValueError("Snapshot belongs to a different Google account; cannot bind to another account")
+        preferred_account_id = snap["account_id"]
+
+    account_id = account_pool.select_account(preferred_account_id)
     access_token = account_pool.get_valid_access_token(account_id)
 
     # 2. Generate UUID and 44-character notebook hash
@@ -104,8 +119,8 @@ def create_session(
                 id, name, account_id, notebook_hash, endpoint, proxy_url,
                 proxy_token_enc, token_expires_at, accelerator, shape,
                 lifecycle_policy, idle_timeout_sec, ssh_local_port,
-                workspace_subpath, remote_workdir, template_id, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                workspace_subpath, remote_workdir, template_id, snapshot_id, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id,
@@ -124,6 +139,7 @@ def create_session(
                 req.workspace_subpath or "",
                 req.remote_workdir or "/content",
                 req.template_id,
+                req.snapshot_id,
                 initial_status,
             ),
         )
@@ -239,7 +255,7 @@ def list_sessions(status_filter: Optional[str] = None) -> List[Dict[str, Any]]:
                s.notebook_hash, s.endpoint, s.proxy_url, s.accelerator,
                s.shape, s.lifecycle_policy, s.idle_timeout_sec,
                s.ssh_local_port, s.workspace_subpath, s.remote_workdir,
-               s.template_id, s.status, s.created_at, s.stopped_at
+               s.template_id, s.snapshot_id, s.status, s.created_at, s.stopped_at
         FROM sessions s
         LEFT JOIN accounts a ON s.account_id = a.id
     """
@@ -271,7 +287,7 @@ def get_session(session_id: str) -> Optional[Dict[str, Any]]:
                    s.notebook_hash, s.endpoint, s.proxy_url, s.accelerator,
                    s.shape, s.lifecycle_policy, s.idle_timeout_sec,
                    s.ssh_local_port, s.workspace_subpath, s.remote_workdir,
-                   s.template_id, s.status, s.created_at, s.stopped_at
+                   s.template_id, s.snapshot_id, s.status, s.created_at, s.stopped_at
             FROM sessions s
             LEFT JOIN accounts a ON s.account_id = a.id
             WHERE s.id = ?

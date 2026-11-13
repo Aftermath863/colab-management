@@ -22,6 +22,7 @@ from backend.app.api.routes_files import router as files_router
 from backend.app.api.routes_jobs import router as jobs_router
 from backend.app.api.routes_notifications import router as notifications_router
 from backend.app.api.routes_sessions import router as sessions_router
+from backend.app.api.routes_snapshots import router as snapshots_router
 from backend.app.api.routes_storage import router as storage_router
 from backend.app.api.routes_telemetry import router as telemetry_router
 from backend.app.api.routes_templates import router as templates_router
@@ -141,6 +142,7 @@ app.include_router(storage_router)
 app.include_router(telemetry_router)
 app.include_router(jobs_router)
 app.include_router(notifications_router)
+app.include_router(snapshots_router)
 
 
 # Health Check Endpoint for Docker & Orchestrator

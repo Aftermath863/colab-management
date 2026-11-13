@@ -28,6 +28,7 @@ export interface Session {
   workspace_subpath: string;
   remote_workdir: string;
   template_id?: string;
+  snapshot_id?: string;
   status: 'PROVISIONING' | 'BOOTSTRAPPING' | 'READY' | 'BUSY' | 'ORPHAN' | 'STOPPED' | 'LOST' | 'FAILED';
   created_at: string;
   stopped_at?: string;
@@ -172,4 +173,54 @@ export interface NotificationChannelCreatePayload {
   config: Record<string, any>;
   events: string[];
   enabled?: boolean;
+}
+
+export type SnapshotMode = 'hybrid' | 'full_binary';
+export type SnapshotStatus = 'CREATING' | 'READY' | 'FAILED';
+
+export interface Snapshot {
+  id: string;
+  name: string;
+  description: string;
+  account_id: string;
+  account_email?: string;
+  source_session_id?: string;
+  capture_mode: SnapshotMode;
+  drive_folder_path: string;
+  python_version: string;
+  accelerator: string;
+  shape: string;
+  apt_package_count: number;
+  pip_package_count: number;
+  workspace_size_bytes: number;
+  pylibs_size_bytes: number;
+  status: SnapshotStatus;
+  error_message?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface SnapshotTask {
+  task_id?: string;
+  session_id: string;
+  snapshot_id?: string;
+  action?: 'save' | 'restore' | 'sync';
+  status: 'IDLE' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+  step?: string;
+  progress_pct?: number;
+  message?: string;
+  error_message?: string;
+  stop_after_save?: boolean;
+  capture_mode?: SnapshotMode;
+  started_at?: string;
+  finished_at?: string;
+}
+
+export interface SnapshotActionResponse {
+  action_status: 'AUTH_REQUIRED' | 'STARTED' | 'SYNCED' | 'ERROR';
+  redirect_url?: string;
+  snapshot?: Snapshot;
+  snapshots?: Snapshot[];
+  task?: SnapshotTask;
+  message?: string;
 }

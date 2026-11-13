@@ -13,6 +13,10 @@ import {
   TelemetryResponse,
   NotificationChannel,
   NotificationChannelCreatePayload,
+  Snapshot,
+  SnapshotMode,
+  SnapshotTask,
+  SnapshotActionResponse,
 } from '../types';
 
 import {
@@ -169,6 +173,7 @@ export const api = {
     lifecycle_policy: string;
     account_id?: string;
     template_id?: string;
+    snapshot_id?: string;
   }): Promise<Session> {
     const res = checkResponse(await fetch(`${API_BASE}/sessions`, {
       method: 'POST',
@@ -548,6 +553,74 @@ export const api = {
       headers: getHeaders(),
     }));
     if (!res.ok) throw new Error('Failed to test webhook channel');
+    return res.json();
+  },
+
+  // Environment Snapshots API
+  async getSnapshots(accountId?: string): Promise<Snapshot[]> {
+    const url = accountId
+      ? `${API_BASE}/snapshots?account_id=${encodeURIComponent(accountId)}`
+      : `${API_BASE}/snapshots`;
+    const res = checkResponse(await fetch(url, { headers: getHeaders() }));
+    if (!res.ok) throw new Error(await extractErrorDetail(res, 'Failed to fetch snapshots'));
+    return res.json();
+  },
+
+  async deleteSnapshot(snapshotId: string): Promise<void> {
+    const res = checkResponse(await fetch(`${API_BASE}/snapshots/${snapshotId}`, {
+      method: 'DELETE',
+      headers: getHeaders(),
+    }));
+    if (!res.ok) throw new Error(await extractErrorDetail(res, 'Failed to delete snapshot'));
+  },
+
+  async syncSnapshotsFromDrive(sessionId: string): Promise<SnapshotActionResponse> {
+    const res = checkResponse(await fetch(`${API_BASE}/snapshots/sync`, {
+      method: 'POST',
+      headers: getHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ session_id: sessionId }),
+    }));
+    if (!res.ok) throw new Error(await extractErrorDetail(res, 'Failed to sync snapshots from Google Drive'));
+    return res.json();
+  },
+
+  async saveSessionSnapshot(
+    sessionId: string,
+    payload: {
+      name: string;
+      description?: string;
+      capture_mode: SnapshotMode;
+      overwrite_snapshot_id?: string;
+      stop_after_save?: boolean;
+    },
+  ): Promise<SnapshotActionResponse> {
+    const res = checkResponse(await fetch(`${API_BASE}/sessions/${sessionId}/snapshots/save`, {
+      method: 'POST',
+      headers: getHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(payload),
+    }));
+    if (!res.ok) throw new Error(await extractErrorDetail(res, 'Failed to save snapshot'));
+    return res.json();
+  },
+
+  async restoreSessionSnapshot(
+    sessionId: string,
+    snapshotId: string,
+  ): Promise<SnapshotActionResponse> {
+    const res = checkResponse(await fetch(`${API_BASE}/sessions/${sessionId}/snapshots/restore`, {
+      method: 'POST',
+      headers: getHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ snapshot_id: snapshotId }),
+    }));
+    if (!res.ok) throw new Error(await extractErrorDetail(res, 'Failed to restore snapshot'));
+    return res.json();
+  },
+
+  async getSessionSnapshotTask(sessionId: string): Promise<SnapshotTask> {
+    const res = checkResponse(await fetch(`${API_BASE}/sessions/${sessionId}/snapshots/task`, {
+      headers: getHeaders(),
+    }));
+    if (!res.ok) throw new Error(await extractErrorDetail(res, 'Failed to poll snapshot task'));
     return res.json();
   },
 };

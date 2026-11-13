@@ -9,6 +9,7 @@ import {
   Cloud,
   Key,
   Activity,
+  Camera,
 } from 'lucide-react';
 import { Session } from '../types';
 import { TerminalTab } from '../components/TerminalTab';
@@ -17,17 +18,27 @@ import { MonacoEditorTab } from '../components/MonacoEditorTab';
 import { TelemetryCharts } from '../components/TelemetryCharts';
 import { SSHHelperModal } from '../components/SSHHelperModal';
 import { StorageWizardModal } from '../components/StorageWizardModal';
+import { SnapshotModal } from '../components/SnapshotModal';
+import { StopSessionModal } from '../components/StopSessionModal';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { api } from '../services/api';
 import { useI18n } from '../i18n';
 
 interface Props {
   session: Session;
+  autoRestoreSnapshotId?: string | null;
+  onClearAutoRestore?: () => void;
   onBack: () => void;
   onStop: (sessionId: string) => Promise<void>;
 }
 
-export const SessionWorkbenchPage: React.FC<Props> = ({ session, onBack, onStop }) => {
+export const SessionWorkbenchPage: React.FC<Props> = ({
+  session,
+  autoRestoreSnapshotId = null,
+  onClearAutoRestore,
+  onBack,
+  onStop,
+}) => {
   const { t } = useI18n();
   const [activeTab, setActiveTab] = useState<'terminal' | 'files' | 'editor' | 'metrics'>('terminal');
   const [editingFile, setEditingFile] = useState<string | null>(null);
@@ -36,6 +47,20 @@ export const SessionWorkbenchPage: React.FC<Props> = ({ session, onBack, onStop 
   // Modals
   const [isSSHModalOpen, setIsSSHModalOpen] = useState(false);
   const [isStorageModalOpen, setIsStorageModalOpen] = useState(false);
+  const [isSnapshotModalOpen, setIsSnapshotModalOpen] = useState(Boolean(autoRestoreSnapshotId));
+  const [snapshotModalTab, setSnapshotModalTab] = useState<'save' | 'restore'>(
+    autoRestoreSnapshotId ? 'restore' : 'save',
+  );
+  const [snapshotStopAfterSave, setSnapshotStopAfterSave] = useState(false);
+  const [isStopModalOpen, setIsStopModalOpen] = useState(false);
+
+  useEffect(() => {
+    if (autoRestoreSnapshotId) {
+      setSnapshotModalTab('restore');
+      setSnapshotStopAfterSave(false);
+      setIsSnapshotModalOpen(true);
+    }
+  }, [autoRestoreSnapshotId]);
 
   useEffect(() => {
     if (!colabUrl) {
@@ -93,6 +118,20 @@ export const SessionWorkbenchPage: React.FC<Props> = ({ session, onBack, onStop 
         <div className="flex flex-wrap items-center gap-2 sm:gap-3 max-w-full">
           <LanguageSwitcher />
 
+          {/* Environment Snapshot Button */}
+          <button
+            type="button"
+            onClick={() => {
+              setSnapshotModalTab('save');
+              setSnapshotStopAfterSave(false);
+              setIsSnapshotModalOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-indigo-600/80 hover:bg-indigo-600 rounded text-xs font-medium text-white transition whitespace-nowrap"
+          >
+            <Camera className="w-3.5 h-3.5 shrink-0" />
+            {t('snapshots.buttonLabel')}
+          </button>
+
           {/* Cloud Storage Wizard Button */}
           <button
             type="button"
@@ -116,7 +155,7 @@ export const SessionWorkbenchPage: React.FC<Props> = ({ session, onBack, onStop 
           )}
           <button
             type="button"
-            onClick={() => onStop(session.id)}
+            onClick={() => setIsStopModalOpen(true)}
             className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-red-600/80 hover:bg-red-600 rounded text-xs font-medium text-white transition whitespace-nowrap"
           >
             <Square className="w-3.5 h-3.5 fill-current shrink-0" />
@@ -212,6 +251,48 @@ export const SessionWorkbenchPage: React.FC<Props> = ({ session, onBack, onStop 
           sessionId={session.id}
           isOpen={isStorageModalOpen}
           onClose={() => setIsStorageModalOpen(false)}
+        />
+      )}
+
+      {/* Environment Snapshot Save/Restore Modal */}
+      {isSnapshotModalOpen && (
+        <SnapshotModal
+          session={session}
+          initialTab={snapshotModalTab}
+          initialStopAfterSave={snapshotStopAfterSave}
+          initialRestoreSnapshotId={autoRestoreSnapshotId || undefined}
+          autoStartRestore={Boolean(autoRestoreSnapshotId && snapshotModalTab === 'restore')}
+          onCompleted={(task) => {
+            if (task.action === 'restore') {
+              onClearAutoRestore?.();
+            }
+            if (task.stop_after_save && task.status === 'COMPLETED') {
+              setIsSnapshotModalOpen(false);
+              onBack();
+            }
+          }}
+          onClose={() => {
+            setIsSnapshotModalOpen(false);
+            onClearAutoRestore?.();
+          }}
+        />
+      )}
+
+      {/* Stop Session Confirmation Modal (Save Snapshot First vs Direct Destroy) */}
+      {isStopModalOpen && (
+        <StopSessionModal
+          session={session}
+          onSaveAndStop={() => {
+            setIsStopModalOpen(false);
+            setSnapshotModalTab('save');
+            setSnapshotStopAfterSave(true);
+            setIsSnapshotModalOpen(true);
+          }}
+          onStopDirectly={async () => {
+            setIsStopModalOpen(false);
+            await onStop(session.id);
+          }}
+          onClose={() => setIsStopModalOpen(false)}
         />
       )}
     </div>

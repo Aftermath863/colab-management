@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Cpu, X } from 'lucide-react';
-import { Account } from '../types';
+import { Account, Snapshot, Template } from '../types';
+import { api } from '../services/api';
 import { useI18n, TranslationKey } from '../i18n';
 import {
   ACCELERATOR_IDS,
@@ -23,25 +24,63 @@ const SESSION_ACCELERATOR_KEY_MAP: Record<AcceleratorId, TranslationKey> = {
 
 interface Props {
   accounts: Account[];
+  initialSnapshotId?: string;
   onLaunch: (params: {
     name: string;
     accelerator: string;
     shape: string;
     lifecycle_policy: string;
     account_id?: string;
+    template_id?: string;
+    snapshot_id?: string;
   }) => Promise<void>;
   onClose: () => void;
 }
 
-export const NewSessionModal: React.FC<Props> = ({ accounts, onLaunch, onClose }) => {
+export const NewSessionModal: React.FC<Props> = ({
+  accounts,
+  initialSnapshotId,
+  onLaunch,
+  onClose,
+}) => {
   const { t, te, formatLifecycle } = useI18n();
   const [name, setName] = useState(`session-${Math.random().toString(36).substring(2, 7)}`);
   const [accelerator, setAccelerator] = useState('T4');
   const [preferredShape, setPreferredShape] = useState<MachineShapeType>('standard');
   const [lifecyclePolicy, setLifecyclePolicy] = useState('interactive');
   const [accountId, setAccountId] = useState('');
+  const [initMode, setInitMode] = useState<'none' | 'snapshot' | 'template'>(
+    initialSnapshotId ? 'snapshot' : 'none',
+  );
+  const [snapshotId, setSnapshotId] = useState(initialSnapshotId || '');
+  const [templateId, setTemplateId] = useState('');
+  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
+  const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    Promise.all([
+      api.getSnapshots().catch(() => []),
+      api.getTemplates().catch(() => []),
+    ]).then(([snaps, tpls]) => {
+      setSnapshots(snaps.filter((s) => s.status === 'READY'));
+      setTemplates(tpls);
+    });
+  }, []);
+
+  const selectedSnapshot =
+    initMode === 'snapshot' && snapshotId
+      ? snapshots.find((s) => s.id === snapshotId)
+      : undefined;
+
+  useEffect(() => {
+    if (selectedSnapshot) {
+      setAccountId(selectedSnapshot.account_id);
+    }
+  }, [selectedSnapshot]);
+
+  const effectiveAccountId = selectedSnapshot ? selectedSnapshot.account_id : accountId;
 
   const highMemOnly = isHighMemOnlyAccelerator(accelerator);
   const effectiveShape = resolveEffectiveShape(accelerator, preferredShape);
@@ -62,7 +101,9 @@ export const NewSessionModal: React.FC<Props> = ({ accounts, onLaunch, onClose }
         accelerator,
         shape: effectiveShape,
         lifecycle_policy: lifecyclePolicy,
-        account_id: accountId || undefined,
+        account_id: effectiveAccountId || undefined,
+        template_id: initMode === 'template' && templateId ? templateId : undefined,
+        snapshot_id: initMode === 'snapshot' && snapshotId ? snapshotId : undefined,
       });
       onClose();
     } catch (err: any) {
@@ -156,12 +197,80 @@ export const NewSessionModal: React.FC<Props> = ({ accounts, onLaunch, onClose }
 
           <div>
             <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+              {t('snapshots.initModeLabel')}
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {(['none', 'snapshot', 'template'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setInitMode(mode)}
+                  className={`px-2.5 py-2 rounded border text-xs font-medium transition-colors ${
+                    initMode === mode
+                      ? 'bg-blue-600/20 border-blue-500 text-blue-300'
+                      : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {mode === 'none'
+                    ? t('snapshots.initModeNone')
+                    : mode === 'snapshot'
+                      ? t('snapshots.initModeSnapshot')
+                      : t('snapshots.initModeTemplate')}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {initMode === 'snapshot' && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                {t('snapshots.snapshotSelectLabel')}
+              </label>
+              <select
+                value={snapshotId}
+                onChange={(e) => setSnapshotId(e.target.value)}
+                required
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm text-white focus:border-blue-500 focus:outline-none"
+              >
+                <option value="">{t('snapshots.snapshotSelectPlaceholder')}</option>
+                {snapshots.map((sn) => (
+                  <option key={sn.id} value={sn.id}>
+                    {sn.name} ({sn.account_email || sn.account_id})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {initMode === 'template' && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                {t('jobs.envTemplateLabel')}
+              </label>
+              <select
+                value={templateId}
+                onChange={(e) => setTemplateId(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm text-white focus:border-blue-500 focus:outline-none"
+              >
+                <option value="">{t('jobs.envTemplateNone')}</option>
+                {templates.map((tpl) => (
+                  <option key={tpl.id} value={tpl.id}>
+                    {tpl.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
               {t('newSession.accountSelector')}
             </label>
             <select
-              value={accountId}
+              value={effectiveAccountId}
               onChange={(e) => setAccountId(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm text-white focus:border-blue-500 focus:outline-none"
+              disabled={Boolean(selectedSnapshot)}
+              className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm text-white focus:border-blue-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
             >
               <option value="">{t('newSession.autoSelectAccount')}</option>
               {accounts.map((acc) => (
@@ -174,6 +283,13 @@ export const NewSessionModal: React.FC<Props> = ({ accounts, onLaunch, onClose }
                 </option>
               ))}
             </select>
+            {selectedSnapshot && (
+              <p className="mt-1 text-[11px] text-amber-400/90">
+                {t('snapshots.snapshotAccountLockedHint', {
+                  email: selectedSnapshot.account_email || selectedSnapshot.account_id,
+                })}
+              </p>
+            )}
           </div>
 
           {error && (

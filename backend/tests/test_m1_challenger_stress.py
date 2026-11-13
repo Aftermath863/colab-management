@@ -269,7 +269,7 @@ class TestDatabaseWALAndForeignKeysStress(unittest.TestCase):
             self.assertEqual(fk, 1)
 
     def test_all_8_tables_exist(self):
-        """Verify exact 8 tables exist in schema."""
+        """Verify exact 9 tables exist in schema."""
         health = check_db_health(self.db_path)
         expected_tables = {
             "accounts",
@@ -277,12 +277,13 @@ class TestDatabaseWALAndForeignKeysStress(unittest.TestCase):
             "notification_channels",
             "secrets",
             "sessions",
+            "snapshots",
             "storage_profiles",
             "telemetry_samples",
             "templates",
         }
         self.assertEqual(set(health["tables"]), expected_tables)
-        self.assertEqual(health["table_count"], 8)
+        self.assertEqual(health["table_count"], 9)
 
     def test_cascade_deletion_of_sessions_and_telemetry(self):
         """Deleting an account must cascade-delete its sessions and associated telemetry."""
