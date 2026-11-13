@@ -109,6 +109,7 @@ export interface Job {
   name: string;
   session_id?: string;
   target_accelerator: string;
+  target_shape?: 'standard' | 'hm' | string;
   allow_fallback: boolean;
   template_id?: string;
   job_type: 'python' | 'notebook' | 'shell';
@@ -125,6 +126,7 @@ export interface Job {
 export interface JobCreatePayload {
   name: string;
   target_accelerator: string;
+  target_shape?: 'standard' | 'hm';
   allow_fallback?: boolean;
   template_id?: string;
   job_type: 'python' | 'notebook' | 'shell';

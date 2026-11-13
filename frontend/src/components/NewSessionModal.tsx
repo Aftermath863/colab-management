@@ -1,7 +1,25 @@
 import React, { useState } from 'react';
 import { Cpu, X } from 'lucide-react';
 import { Account } from '../types';
-import { useI18n } from '../i18n';
+import { useI18n, TranslationKey } from '../i18n';
+import {
+  ACCELERATOR_IDS,
+  AcceleratorId,
+  MachineShapeType,
+  isHighMemOnlyAccelerator,
+  resolveEffectiveShape,
+} from '../utils/accelerators';
+
+const SESSION_ACCELERATOR_KEY_MAP: Record<AcceleratorId, TranslationKey> = {
+  CPU: 'newSession.accCPU',
+  T4: 'newSession.accT4',
+  G4: 'newSession.accG4',
+  L4: 'newSession.accL4',
+  A100: 'newSession.accA100',
+  H100: 'newSession.accH100',
+  V5E1: 'newSession.accV5E1',
+  V6E1: 'newSession.accV6E1',
+};
 
 interface Props {
   accounts: Account[];
@@ -19,18 +37,19 @@ export const NewSessionModal: React.FC<Props> = ({ accounts, onLaunch, onClose }
   const { t, te, formatLifecycle } = useI18n();
   const [name, setName] = useState(`session-${Math.random().toString(36).substring(2, 7)}`);
   const [accelerator, setAccelerator] = useState('T4');
-  const [shape, setShape] = useState('standard');
+  const [preferredShape, setPreferredShape] = useState<MachineShapeType>('standard');
   const [lifecyclePolicy, setLifecyclePolicy] = useState('interactive');
   const [accountId, setAccountId] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const accelerators = [
-    { id: 'T4', name: t('newSession.accT4') },
-    { id: 'L4', name: t('newSession.accL4') },
-    { id: 'A100', name: t('newSession.accA100') },
-    { id: 'V5E1', name: t('newSession.accV5E1') },
-  ];
+  const highMemOnly = isHighMemOnlyAccelerator(accelerator);
+  const effectiveShape = resolveEffectiveShape(accelerator, preferredShape);
+
+  const accelerators = ACCELERATOR_IDS.map((id) => ({
+    id,
+    name: t(SESSION_ACCELERATOR_KEY_MAP[id]),
+  }));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,7 +60,7 @@ export const NewSessionModal: React.FC<Props> = ({ accounts, onLaunch, onClose }
       await onLaunch({
         name: name.trim(),
         accelerator,
-        shape,
+        shape: effectiveShape,
         lifecycle_policy: lifecyclePolicy,
         account_id: accountId || undefined,
       });
@@ -103,10 +122,10 @@ export const NewSessionModal: React.FC<Props> = ({ accounts, onLaunch, onClose }
                 {t('newSession.machineShape')}
               </label>
               <select
-                value={shape}
-                onChange={(e) => setShape(e.target.value)}
-                disabled={accelerator === 'L4' || accelerator === 'V5E1'}
-                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm text-white focus:border-blue-500 focus:outline-none disabled:opacity-50"
+                value={effectiveShape}
+                onChange={(e) => setPreferredShape(e.target.value as MachineShapeType)}
+                disabled={highMemOnly}
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm text-white focus:border-blue-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 <option value="standard">{t('newSession.shapeStandard')}</option>
                 <option value="hm">{t('newSession.shapeHighRam')}</option>
@@ -128,6 +147,12 @@ export const NewSessionModal: React.FC<Props> = ({ accounts, onLaunch, onClose }
               </select>
             </div>
           </div>
+
+          {highMemOnly && (
+            <p className="-mt-2 text-[11px] text-amber-400/90">
+              {t('newSession.highRamOnlyHint')}
+            </p>
+          )}
 
           <div>
             <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">

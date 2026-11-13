@@ -102,16 +102,22 @@ class TestDatabaseAndModels(unittest.TestCase):
             self.assertIsNone(conn.execute("SELECT id FROM telemetry_samples WHERE session_id = 'sess_1'").fetchone())
 
     def test_session_create_request_high_ram_shape_normalization(self):
-        # For standard accelerator (e.g. T4), shape='hm' is preserved
+        # For dual-shape accelerators (e.g. CPU, T4), shape='hm' and 'standard' are preserved
+        cpu_hm_req = SessionCreateRequest(name="test-cpu-hm", accelerator="CPU", shape="hm")
+        self.assertEqual(cpu_hm_req.shape, "hm")
+
         t4_req = SessionCreateRequest(name="test-t4", accelerator="T4", shape="hm")
         self.assertEqual(t4_req.shape, "hm")
 
-        # For L4 and V5E1, passing shape='hm' is normalized to 'standard' per Colab rules
-        l4_req = SessionCreateRequest(name="test-l4", accelerator="L4", shape="hm")
-        self.assertEqual(l4_req.shape, "standard")
+        # For L4, V5E1, V6E1 (High-RAM only hardware), shape automatically coerces to 'hm'
+        l4_req = SessionCreateRequest(name="test-l4", accelerator="L4", shape="standard")
+        self.assertEqual(l4_req.shape, "hm")
 
         v5e1_req = SessionCreateRequest(name="test-v5e1", accelerator="V5E1", shape="hm")
-        self.assertEqual(v5e1_req.shape, "standard")
+        self.assertEqual(v5e1_req.shape, "hm")
+
+        v6e1_req = SessionCreateRequest(name="test-v6e1", accelerator="V6E1", shape="standard")
+        self.assertEqual(v6e1_req.shape, "hm")
 
     def test_pydantic_models_validation(self):
         acc = AccountSummary(

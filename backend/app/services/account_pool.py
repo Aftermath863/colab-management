@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 from backend.app.config import settings
 from backend.app.core.database import get_db
-from backend.app.core.models import AccountSummary
+from backend.app.core.models import HIGH_MEM_ONLY_ACCELERATORS, AccountSummary
 from backend.app.core.security import decrypt_secret, encrypt_secret
 from backend.app.services.colab_client import ColabClient
 
@@ -348,14 +348,24 @@ def _sync_account_locked(account_id: str, client: Optional[ColabClient] = None) 
             else:
                 # Discovered orphan instance! Record it
                 orphan_id = f"orphan_{uuid.uuid4().hex[:8]}"
-                acc_type = asgn.get("accelerator", "T4")
+                raw_acc = str(asgn.get("accelerator") or "T4").strip().upper()
+                acc_type = "CPU" if raw_acc in ("NONE", "CPU", "") else raw_acc
+                raw_shape = asgn.get("machineShape")
+                orphan_shape = (
+                    "hm"
+                    if (
+                        acc_type in HIGH_MEM_ONLY_ACCELERATORS
+                        or raw_shape in (1, "1", "HIGH_RAM", "hm", "HM")
+                    )
+                    else "standard"
+                )
                 conn.execute(
                     """
                     INSERT INTO sessions (
                         id, name, account_id, notebook_hash, endpoint, proxy_url,
                         proxy_token_enc, token_expires_at, accelerator, shape,
                         lifecycle_policy, idle_timeout_sec, ssh_local_port, status
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'standard', 'interactive', 1800, NULL, 'ORPHAN')
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'interactive', 1800, NULL, 'ORPHAN')
                     """,
                     (
                         orphan_id,
@@ -367,6 +377,7 @@ def _sync_account_locked(account_id: str, client: Optional[ColabClient] = None) 
                         encrypt_secret(proxy_token),
                         token_expires_at,
                         acc_type,
+                        orphan_shape,
                     ),
                 )
 

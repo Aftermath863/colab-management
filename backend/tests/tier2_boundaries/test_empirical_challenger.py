@@ -283,10 +283,15 @@ class TestEmpiricalChallenger(unittest.TestCase):
                     self.assertNotIn("shape", req["query"])
 
     def test_session_create_request_model_coercion(self):
-        """Verify SessionCreateRequest model validator coerces shape to standard for L4/V5E1/V6E1."""
+        """Verify SessionCreateRequest model validator sets shape='hm' for High-RAM-only L4/V5E1/V6E1."""
         for acc in HIGH_MEM_ONLY_ACCELERATORS:
-            req = SessionCreateRequest(name="test-shape", accelerator=acc, shape="hm")
-            self.assertEqual(req.shape, "standard", f"Model failed to coerce shape for {acc}")
+            req_hm = SessionCreateRequest(name="test-shape", accelerator=acc, shape="hm")
+            self.assertEqual(req_hm.shape, "hm", f"Model should retain hm for {acc}")
+            req_std = SessionCreateRequest(name="test-shape-std", accelerator=acc, shape="standard")
+            self.assertEqual(req_std.shape, "hm", f"Model failed to coerce shape='standard' to 'hm' for {acc}")
+
+        req_cpu = SessionCreateRequest(name="test-shape", accelerator="CPU", shape="hm")
+        self.assertEqual(req_cpu.shape, "hm")
 
         req_t4 = SessionCreateRequest(name="test-shape", accelerator="T4", shape="hm")
         self.assertEqual(req_t4.shape, "hm")

@@ -187,22 +187,27 @@ class ColabClient:
         Step 2: POST /tun/m/assign with X-Goog-Colab-Token.
         Transient errors (502/503/504/timeout) trigger retry with reconciliation probe.
         """
-        # Determine variant and normalize accelerator
-        acc_upper = accelerator.upper()
-        if "TPU" in acc_upper or "V5E" in acc_upper or "V6E" in acc_upper:
+        # Determine variant and normalize wire accelerator per official colab-cli protocol
+        acc_upper = (accelerator or "").strip().upper()
+        if acc_upper in ("CPU", "NONE", ""):
+            variant = "DEFAULT"
+            wire_accelerator = "NONE"
+        elif acc_upper.startswith("TPU") or acc_upper.startswith("V5E") or acc_upper.startswith("V6E"):
             variant = "TPU"
+            wire_accelerator = acc_upper
         else:
             variant = "GPU"
+            wire_accelerator = acc_upper
 
         params: Dict[str, Any] = {
             "nbh": notebook_hash,
             "variant": variant,
-            "accelerator": acc_upper,
+            "accelerator": wire_accelerator,
             "authuser": "0",
         }
 
-        # Apply accelerator shape rule: omit shape=hm for L4, V5E1, V6E1
-        if shape == "hm" and acc_upper not in HIGH_MEM_ONLY_ACCELERATORS:
+        # Apply accelerator shape rule: omit shape=hm on wire for L4, V5E1, V6E1
+        if shape.lower() == "hm" and wire_accelerator not in HIGH_MEM_ONLY_ACCELERATORS:
             params["shape"] = "hm"
 
         assign_url = f"{self.base_url}/tun/m/assign"

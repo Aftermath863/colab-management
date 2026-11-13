@@ -15,10 +15,28 @@ import {
 } from 'lucide-react';
 import { Job, JobCreatePayload, Template } from '../types';
 import { api } from '../services/api';
-import { LocalizedText, useI18n } from '../i18n';
+import { LocalizedText, TranslationKey, useI18n } from '../i18n';
+import {
+  ACCELERATOR_IDS,
+  AcceleratorId,
+  MachineShapeType,
+  isHighMemOnlyAccelerator,
+  resolveEffectiveShape,
+} from '../utils/accelerators';
+
+const JOB_ACCELERATOR_KEY_MAP: Record<AcceleratorId, TranslationKey> = {
+  CPU: 'jobs.accCPU',
+  T4: 'jobs.accT4',
+  G4: 'jobs.accG4',
+  L4: 'jobs.accL4',
+  A100: 'jobs.accA100',
+  H100: 'jobs.accH100',
+  V5E1: 'jobs.accV5E1',
+  V6E1: 'jobs.accV6E1',
+};
 
 export const JobsPage: React.FC = () => {
-  const { t, tm, formatActionError, formatJobStatus, formatJobFilter, formatJobType } = useI18n();
+  const { t, tm, formatActionError, formatJobStatus, formatJobFilter, formatJobType, formatShape } = useI18n();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
@@ -29,6 +47,7 @@ export const JobsPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [formName, setFormName] = useState('');
   const [formAccelerator, setFormAccelerator] = useState('T4');
+  const [formPreferredShape, setFormPreferredShape] = useState<MachineShapeType>('standard');
   const [formAllowFallback, setFormAllowFallback] = useState(true);
   const [formTemplateId, setFormTemplateId] = useState('');
   const [formJobType, setFormJobType] = useState<'python' | 'notebook' | 'shell'>('python');
@@ -117,10 +136,14 @@ export const JobsPage: React.FC = () => {
         .split(/\s+/)
         .filter((a) => a.length > 0);
 
+      const jobShape = resolveEffectiveShape(formAccelerator, formPreferredShape);
+      const isCpu = formAccelerator === 'CPU';
+
       const payload: JobCreatePayload = {
         name: formName.trim(),
         target_accelerator: formAccelerator,
-        allow_fallback: formAllowFallback,
+        target_shape: jobShape,
+        allow_fallback: isCpu ? false : formAllowFallback,
         template_id: formTemplateId || undefined,
         job_type: formJobType,
         entry_path_or_cmd: formEntry.trim(),
@@ -141,6 +164,7 @@ export const JobsPage: React.FC = () => {
   const resetForm = () => {
     setFormName('');
     setFormAccelerator('T4');
+    setFormPreferredShape('standard');
     setFormAllowFallback(true);
     setFormTemplateId('');
     setFormJobType('python');
@@ -300,11 +324,11 @@ export const JobsPage: React.FC = () => {
 
                     {/* Accelerator */}
                     <td className="px-6 py-4">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
                         <span className="px-2 py-0.5 text-xs font-mono bg-blue-950 text-blue-300 border border-blue-800/50 rounded font-semibold">
-                          {job.target_accelerator}
+                          {job.target_accelerator} ({formatShape(resolveEffectiveShape(job.target_accelerator, job.target_shape || 'standard'))})
                         </span>
-                        {job.allow_fallback && (
+                        {job.allow_fallback && job.target_accelerator !== 'CPU' && (
                           <span className="text-[10px] text-slate-400" title={t('jobs.fallbackTooltip')}>
                             {t('jobs.fallbackBadge')}
                           </span>
@@ -435,36 +459,70 @@ export const JobsPage: React.FC = () => {
                 />
               </div>
 
-              {/* Accelerator & Fallback */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-300 font-medium mb-1">
-                    {t('jobs.targetAcceleratorLabel')}
-                  </label>
-                  <select
-                    value={formAccelerator}
-                    onChange={(e) => setFormAccelerator(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
-                  >
-                    <option value="T4">{t('jobs.accT4')}</option>
-                    <option value="L4">{t('jobs.accL4')}</option>
-                    <option value="A100">{t('jobs.accA100')}</option>
-                    <option value="H100">{t('jobs.accH100')}</option>
-                    <option value="V5E1">{t('jobs.accV5E1')}</option>
-                  </select>
-                </div>
-                <div className="flex items-center pt-5">
-                  <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={formAllowFallback}
-                      onChange={(e) => setFormAllowFallback(e.target.checked)}
-                      className="rounded bg-slate-950 border-slate-800 text-indigo-600 focus:ring-0"
-                    />
-                    <span>{t('jobs.allowFallbackLabel')}</span>
-                  </label>
-                </div>
-              </div>
+              {/* Accelerator & Memory Shape */}
+              {(() => {
+                const jobHighMemOnly = isHighMemOnlyAccelerator(formAccelerator);
+                const effectiveJobShape = resolveEffectiveShape(formAccelerator, formPreferredShape);
+                const isCpuJob = formAccelerator === 'CPU';
+                return (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-300 font-medium mb-1">
+                          {t('jobs.targetAcceleratorLabel')}
+                        </label>
+                        <select
+                          value={formAccelerator}
+                          onChange={(e) => setFormAccelerator(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
+                        >
+                          {ACCELERATOR_IDS.map((accId) => (
+                            <option key={accId} value={accId}>
+                              {accId} — {t(JOB_ACCELERATOR_KEY_MAP[accId])}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-slate-300 font-medium mb-1">
+                          {t('jobs.targetShapeLabel')}
+                        </label>
+                        <select
+                          value={effectiveJobShape}
+                          onChange={(e) => setFormPreferredShape(e.target.value as MachineShapeType)}
+                          disabled={jobHighMemOnly}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          <option value="standard">{t('jobs.shapeStandard')}</option>
+                          <option value="hm">{t('jobs.shapeHighRam')}</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {jobHighMemOnly && (
+                      <p className="-mt-2 text-[11px] text-amber-400/90">
+                        {t('jobs.highRamOnlyHint')}
+                      </p>
+                    )}
+
+                    <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                      <label className={`flex items-center gap-2 text-slate-300 ${isCpuJob ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
+                        <input
+                          type="checkbox"
+                          checked={isCpuJob ? false : formAllowFallback}
+                          disabled={isCpuJob}
+                          onChange={(e) => setFormAllowFallback(e.target.checked)}
+                          className="rounded bg-slate-950 border-slate-800 text-indigo-600 focus:ring-0 disabled:cursor-not-allowed"
+                        />
+                        <span>{t('jobs.allowFallbackLabel')}</span>
+                      </label>
+                      {isCpuJob && (
+                        <span className="text-[11px] text-slate-500">{t('jobs.cpuNoFallbackHint')}</span>
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
 
               {/* Job Type */}
               <div>

@@ -38,6 +38,12 @@ import { NotificationsPage } from '../src/pages/NotificationsPage';
 import { api } from '../src/services/api';
 import { Account, Session } from '../src/types';
 import { formatSyncTimestamp, getLatestSyncTimestamp } from '../src/utils/time';
+import {
+  ACCELERATOR_IDS,
+  isHighMemOnlyAccelerator,
+  normalizeAcceleratorId,
+  resolveEffectiveShape,
+} from '../src/utils/accelerators';
 
 function collectLeafEntries(obj: Record<string, unknown>, prefix = ''): Map<string, string> {
   const result = new Map<string, string>();
@@ -535,5 +541,46 @@ test('All pages and modals render localized UI and LanguageSwitcher in both zh a
     '多渠道告警通知中心',
   ]) {
     assert.ok(modalsAndPagesZh.includes(label), `Missing "${label}" in Chinese modals/pages`);
+  }
+
+  for (const accId of ACCELERATOR_IDS) {
+    assert.ok(modalsAndPagesZh.includes(`${accId} — `), `Missing accelerator ${accId} option in rendered modals/pages`);
+  }
+  assert.ok(modalsAndPagesZh.includes('机器内存规格'));
+});
+
+test('Accelerator catalog and high-RAM auto-adjustment helpers cover all 8 official runtimes', () => {
+  assert.deepEqual([...ACCELERATOR_IDS], ['CPU', 'T4', 'G4', 'L4', 'A100', 'H100', 'V5E1', 'V6E1']);
+  assert.equal(normalizeAcceleratorId('none'), 'CPU');
+  assert.equal(normalizeAcceleratorId(''), 'CPU');
+  assert.equal(normalizeAcceleratorId('v6e1'), 'V6E1');
+
+  assert.equal(isHighMemOnlyAccelerator('L4'), true);
+  assert.equal(isHighMemOnlyAccelerator('V5E1'), true);
+  assert.equal(isHighMemOnlyAccelerator('V6E1'), true);
+  assert.equal(isHighMemOnlyAccelerator('CPU'), false);
+  assert.equal(isHighMemOnlyAccelerator('T4'), false);
+  assert.equal(isHighMemOnlyAccelerator('G4'), false);
+  assert.equal(isHighMemOnlyAccelerator('A100'), false);
+  assert.equal(isHighMemOnlyAccelerator('H100'), false);
+
+  assert.equal(resolveEffectiveShape('L4', 'standard'), 'hm');
+  assert.equal(resolveEffectiveShape('V5E1', 'standard'), 'hm');
+  assert.equal(resolveEffectiveShape('V6E1', 'standard'), 'hm');
+  assert.equal(resolveEffectiveShape('CPU', 'standard'), 'standard');
+  assert.equal(resolveEffectiveShape('CPU', 'hm'), 'hm');
+  assert.equal(resolveEffectiveShape('G4', 'hm'), 'hm');
+  assert.equal(resolveEffectiveShape('H100', 'standard'), 'standard');
+
+  const modalsEn = renderToStaticMarkup(
+    <I18nProvider initialLocale="en">
+      <div>
+        <NewSessionModal accounts={[]} onLaunch={async () => {}} onClose={() => {}} />
+        <JobsPage />
+      </div>
+    </I18nProvider>
+  );
+  for (const accId of ACCELERATOR_IDS) {
+    assert.ok(modalsEn.includes(`${accId} — `), `Missing accelerator ${accId} in English NewSessionModal`);
   }
 });

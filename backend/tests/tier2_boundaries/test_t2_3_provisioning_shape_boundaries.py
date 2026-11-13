@@ -81,11 +81,13 @@ class TestProvisioningShapeBoundaries(BaseE2ESyncTestCase):
         self.assertEqual(rows[0]["cnt"], 0)
 
     def test_high_ram_shape_omission_for_l4_v5e1_v6e1(self):
-        """High-RAM shape (shape=hm) is strictly omitted for L4, V5E1, V6E1 on wire, but included for T4/A100."""
-        # 1. Test model-level coercion for high-RAM accelerators
+        """High-RAM shape (shape=hm) is stored in DB/models for L4, V5E1, V6E1 while strictly omitted on wire."""
+        # 1. Test model-level auto-adjustment to high-RAM ('hm') for High-RAM-only accelerators
         for acc in ["L4", "V5E1", "V6E1"]:
-            req = SessionCreateRequest(name=f"test-{acc}", accelerator=acc, shape="hm")
-            self.assertEqual(req.shape, "standard", f"Model must coerce shape='hm' to 'standard' for {acc}")
+            req = SessionCreateRequest(name=f"test-{acc}", accelerator=acc, shape="standard")
+            self.assertEqual(req.shape, "hm", f"Model must auto-adjust shape to 'hm' for {acc}")
+            req_hm = SessionCreateRequest(name=f"test-{acc}-hm", accelerator=acc, shape="hm")
+            self.assertEqual(req_hm.shape, "hm", f"Model must keep shape='hm' for {acc}")
 
         # 2. Test wire-level parameter filtering via ColabClient
         colab = ColabClient(base_url=self.hub.urls["control_plane"])

@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     proxy_url TEXT NOT NULL,
     proxy_token_enc TEXT NOT NULL,
     token_expires_at TIMESTAMP NOT NULL,
-    accelerator TEXT NOT NULL, -- T4, L4, G4, A100, H100, V5E1, V6E1
+    accelerator TEXT NOT NULL, -- CPU, T4, L4, G4, A100, H100, V5E1, V6E1
     shape TEXT NOT NULL DEFAULT 'standard', -- standard, hm
     lifecycle_policy TEXT NOT NULL DEFAULT 'interactive', -- interactive, keep_alive, ephemeral
     idle_timeout_sec INTEGER NOT NULL DEFAULT 1800,
@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     name TEXT NOT NULL,
     session_id TEXT,
     target_accelerator TEXT NOT NULL,
+    target_shape TEXT NOT NULL DEFAULT 'standard',
     allow_fallback BOOLEAN NOT NULL DEFAULT 1,
     template_id TEXT,
     job_type TEXT NOT NULL, -- python, notebook, shell
@@ -166,6 +167,19 @@ def init_db(db_path: Optional[str] = None) -> None:
 
         # Execute table definitions
         conn.executescript(DDL_SCHEMA)
+
+        # Idempotent schema migrations for existing SQLite databases
+        job_cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        if "target_shape" not in job_cols:
+            conn.execute("ALTER TABLE jobs ADD COLUMN target_shape TEXT NOT NULL DEFAULT 'standard'")
+
+        # Ensure High-RAM-only accelerators (L4, V5E1, V6E1) reflect 'hm' in local records
+        conn.execute(
+            "UPDATE jobs SET target_shape = 'hm' WHERE target_accelerator IN ('L4', 'V5E1', 'V6E1') AND target_shape != 'hm'"
+        )
+        conn.execute(
+            "UPDATE sessions SET shape = 'hm' WHERE accelerator IN ('L4', 'V5E1', 'V6E1') AND shape = 'standard'"
+        )
         conn.commit()
     finally:
         conn.close()

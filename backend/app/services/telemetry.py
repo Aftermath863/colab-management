@@ -181,10 +181,22 @@ class TelemetryService:
             ram_total = float(raw_metrics.get("ram_total_mb", 0.0))
             disk_used = float(raw_metrics.get("disk_used_gb", 0.0))
             disk_total = float(raw_metrics.get("disk_total_gb", 0.0))
-            gpu_name = raw_metrics.get("gpu_name") or f"Colab {accelerator}"
+            default_hw_name = "CPU Runtime" if accelerator == "CPU" else f"Colab {accelerator}"
+            gpu_name = raw_metrics.get("gpu_name") or default_hw_name
             gpu_util = float(raw_metrics.get("gpu_util_pct", 0.0)) if raw_metrics.get("gpu_util_pct") is not None else None
             vram_used = float(raw_metrics.get("vram_used_mb", 0.0)) if raw_metrics.get("vram_used_mb") is not None else None
             vram_total = float(raw_metrics.get("vram_total_mb", 0.0)) if raw_metrics.get("vram_total_mb") is not None else None
+        elif accelerator == "CPU":
+            # Fallback synthetic heartbeat sample for CPU-only runtime
+            cpu_pct = 5.0
+            ram_used = 2048.0
+            ram_total = 13000.0
+            disk_used = 15.0
+            disk_total = 100.0
+            gpu_name = "CPU Runtime"
+            gpu_util = None
+            vram_used = None
+            vram_total = None
         else:
             # Fallback synthetic heartbeat sample
             cpu_pct = 5.0

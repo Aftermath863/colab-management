@@ -38,7 +38,9 @@ from backend.app.core.models import (
     JobCreate,
     JobResponse,
     JobStatus,
+    MachineShape,
     SessionCreateRequest,
+    normalize_accelerator_value,
 )
 from backend.app.core.security import decrypt_secret
 from backend.app.services import account_pool, session_manager
@@ -55,7 +57,20 @@ ACCELERATOR_FALLBACK_MATRIX: Dict[str, List[str]] = {
     "V6E1": ["V5E1", "T4"],
     "V5E1": ["T4"],
     "T4": [],
+    "CPU": [],
 }
+
+
+def _resolve_job_target_shape(row: Any) -> str:
+    """Resolve effective machine shape ('standard' or 'hm') for a persisted job row."""
+    acc = normalize_accelerator_value(row["target_accelerator"] or "T4")
+    if acc in HIGH_MEM_ONLY_ACCELERATORS:
+        return "hm"
+    try:
+        raw_shape = row["target_shape"]
+    except (KeyError, IndexError):
+        raw_shape = None
+    return "hm" if str(raw_shape or "").strip().lower() == "hm" else "standard"
 
 
 class JobRunnerService:
@@ -118,15 +133,16 @@ class JobRunnerService:
             conn.execute(
                 """
                 INSERT INTO jobs (
-                    id, name, target_accelerator, allow_fallback, template_id,
+                    id, name, target_accelerator, target_shape, allow_fallback, template_id,
                     job_type, entry_path_or_cmd, args_json, status, log_path,
                     output_notebook_path
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'QUEUED', ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'QUEUED', ?, ?)
                 """,
                 (
                     job_id,
                     req.name,
                     req.target_accelerator,
+                    req.target_shape,
                     1 if req.allow_fallback else 0,
                     req.template_id,
                     req.job_type,
@@ -146,29 +162,33 @@ class JobRunnerService:
         data_dir = getattr(settings, "DATA_DIR", "/data")
         return os.path.join(data_dir, "jobs", job_id)
 
+    def _row_to_job_response(self, row: Any) -> JobResponse:
+        return JobResponse(
+            id=row["id"],
+            name=row["name"],
+            session_id=row["session_id"],
+            target_accelerator=row["target_accelerator"],
+            target_shape=_resolve_job_target_shape(row),
+            allow_fallback=bool(row["allow_fallback"]),
+            template_id=row["template_id"],
+            job_type=row["job_type"],
+            entry_path_or_cmd=row["entry_path_or_cmd"],
+            args=json.loads(row["args_json"] or "[]"),
+            status=row["status"],
+            exit_code=row["exit_code"],
+            log_path=row["log_path"],
+            output_notebook_path=row["output_notebook_path"],
+            started_at=str(row["started_at"]) if row["started_at"] else None,
+            finished_at=str(row["finished_at"]) if row["finished_at"] else None,
+        )
+
     def get_job(self, job_id: str) -> Optional[JobResponse]:
         """Fetch job details from database."""
         with get_db() as conn:
             row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
             if not row:
                 return None
-            return JobResponse(
-                id=row["id"],
-                name=row["name"],
-                session_id=row["session_id"],
-                target_accelerator=row["target_accelerator"],
-                allow_fallback=bool(row["allow_fallback"]),
-                template_id=row["template_id"],
-                job_type=row["job_type"],
-                entry_path_or_cmd=row["entry_path_or_cmd"],
-                args=json.loads(row["args_json"] or "[]"),
-                status=row["status"],
-                exit_code=row["exit_code"],
-                log_path=row["log_path"],
-                output_notebook_path=row["output_notebook_path"],
-                started_at=str(row["started_at"]) if row["started_at"] else None,
-                finished_at=str(row["finished_at"]) if row["finished_at"] else None,
-            )
+            return self._row_to_job_response(row)
 
     def list_jobs(self, status: Optional[str] = None, limit: int = 50, offset: int = 0) -> List[JobResponse]:
         """List jobs with optional status filter."""
@@ -182,26 +202,7 @@ class JobRunnerService:
             params.extend([limit, offset])
 
             rows = conn.execute(query, params).fetchall()
-            return [
-                JobResponse(
-                    id=r["id"],
-                    name=r["name"],
-                    session_id=r["session_id"],
-                    target_accelerator=r["target_accelerator"],
-                    allow_fallback=bool(r["allow_fallback"]),
-                    template_id=r["template_id"],
-                    job_type=r["job_type"],
-                    entry_path_or_cmd=r["entry_path_or_cmd"],
-                    args=json.loads(r["args_json"] or "[]"),
-                    status=r["status"],
-                    exit_code=r["exit_code"],
-                    log_path=r["log_path"],
-                    output_notebook_path=r["output_notebook_path"],
-                    started_at=str(r["started_at"]) if r["started_at"] else None,
-                    finished_at=str(r["finished_at"]) if r["finished_at"] else None,
-                )
-                for r in rows
-            ]
+            return [self._row_to_job_response(r) for r in rows]
 
     async def cancel_job(self, job_id: str) -> bool:
         """Cancel a queued or running job."""
@@ -291,6 +292,7 @@ class JobRunnerService:
                 prov_result = await self._provision_session_with_fallback(
                     job_id=job_id,
                     target_accelerator=job["target_accelerator"],
+                    target_shape=_resolve_job_target_shape(job),
                     allow_fallback=bool(job["allow_fallback"]),
                     template_id=job["template_id"],
                 )
@@ -396,26 +398,34 @@ class JobRunnerService:
         target_accelerator: str,
         allow_fallback: bool,
         template_id: Optional[str],
+        target_shape: str = "standard",
     ) -> Dict[str, Any]:
         """Provisions an ephemeral session or reuses an eligible session, cascading through fallback accelerators."""
-        # 1. Attempt to find existing READY session matching target_accelerator
+        norm_target_acc = normalize_accelerator_value(target_accelerator)
+        effective_target_shape: MachineShape = (
+            "hm"
+            if (norm_target_acc in HIGH_MEM_ONLY_ACCELERATORS or str(target_shape).strip().lower() == "hm")
+            else "standard"
+        )
+
+        # 1. Attempt to find existing READY session matching target_accelerator and target_shape
         with get_db() as conn:
             ready_sess = conn.execute(
                 """
-                SELECT id, accelerator FROM sessions
-                WHERE accelerator = ? AND status = 'READY' AND lifecycle_policy != 'ephemeral'
+                SELECT id, accelerator, shape FROM sessions
+                WHERE accelerator = ? AND shape = ? AND status = 'READY' AND lifecycle_policy != 'ephemeral'
                 ORDER BY created_at ASC LIMIT 1
                 """,
-                (target_accelerator,),
+                (norm_target_acc, effective_target_shape),
             ).fetchone()
             if ready_sess:
                 conn.execute("UPDATE sessions SET status = 'BUSY' WHERE id = ?", (ready_sess["id"],))
                 return {"session_id": ready_sess["id"], "is_ephemeral": False}
 
         # 2. Build candidate accelerator list
-        candidates = [target_accelerator]
-        if allow_fallback and target_accelerator in ACCELERATOR_FALLBACK_MATRIX:
-            candidates.extend(ACCELERATOR_FALLBACK_MATRIX[target_accelerator])
+        candidates = [norm_target_acc]
+        if allow_fallback and norm_target_acc in ACCELERATOR_FALLBACK_MATRIX:
+            candidates.extend(ACCELERATOR_FALLBACK_MATRIX[norm_target_acc])
 
         # 3. Retrieve eligible accounts ranked by priority and CCU score
         eligible_accounts = self._get_eligible_accounts_ranked()
@@ -424,28 +434,31 @@ class JobRunnerService:
 
         last_error = None
         for acc in candidates:
-            # Enforce standard shape rule for L4/V5E1/V6E1
-            shape = "standard"
+            cand_shape: MachineShape = (
+                "hm"
+                if (acc in HIGH_MEM_ONLY_ACCELERATORS or str(target_shape).strip().lower() == "hm")
+                else "standard"
+            )
             for acc_id in eligible_accounts:
                 try:
                     sess_name = f"job-sess-{acc.lower()}-{job_id[:6]}"
                     req = SessionCreateRequest(
                         name=sess_name,
                         accelerator=acc,  # type: ignore
-                        shape=shape,
+                        shape=cand_shape,
                         lifecycle_policy="ephemeral",
                         account_id=acc_id,
                         template_id=template_id,
                     )
                     sess = session_manager.create_session(req, client=self.colab)
                     logger.info(
-                        f"Provisioned ephemeral session {sess['id']} ({acc}) on account {acc_id} for job {job_id}"
+                        f"Provisioned ephemeral session {sess['id']} ({acc}, {req.shape}) on account {acc_id} for job {job_id}"
                     )
                     return {"session_id": sess["id"], "is_ephemeral": True}
                 except Exception as e:
                     last_error = e
                     logger.warning(
-                        f"Failed provisioning {acc} on account {acc_id}: {e}. Retrying fallback candidate..."
+                        f"Failed provisioning {acc} ({cand_shape}) on account {acc_id}: {e}. Retrying fallback candidate..."
                     )
                     continue
 

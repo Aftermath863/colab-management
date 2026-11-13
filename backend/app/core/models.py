@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 # --- Enumerations and Literals ---
 
-AcceleratorType = Literal["T4", "L4", "G4", "A100", "H100", "V5E1", "V6E1"]
+AcceleratorType = Literal["CPU", "T4", "L4", "G4", "A100", "H100", "V5E1", "V6E1"]
 MachineShape = Literal["standard", "hm"]
 LifecyclePolicy = Literal["interactive", "keep_alive", "ephemeral"]
 AccountStatus = Literal["ACTIVE", "AUTH_EXPIRED", "COOLDOWN"]
@@ -37,6 +37,16 @@ NotificationProvider = Literal[
 ]
 
 HIGH_MEM_ONLY_ACCELERATORS = frozenset({"L4", "V5E1", "V6E1"})
+
+
+def normalize_accelerator_value(value: Any) -> Any:
+    """Normalize accelerator strings (e.g. Google's 'NONE' -> 'CPU', uppercase)."""
+    if isinstance(value, str):
+        cleaned = value.strip().upper()
+        if cleaned == "NONE":
+            return "CPU"
+        return cleaned
+    return value
 
 
 # --- Account Models ---
@@ -89,11 +99,17 @@ class SessionCreateRequest(BaseModel):
     workspace_subpath: Optional[str] = ""
     remote_workdir: Optional[str] = "/content"
 
+    @field_validator("accelerator", mode="before")
+    @classmethod
+    def _normalize_accelerator(cls, v: Any) -> Any:
+        return normalize_accelerator_value(v)
+
     @model_validator(mode="after")
     def validate_high_ram_rules(self) -> SessionCreateRequest:
-        if self.accelerator in HIGH_MEM_ONLY_ACCELERATORS and self.shape == "hm":
-            # Per Colab protocol, shape=hm is forbidden for L4/V5E1/V6E1; force standard
-            self.shape = "standard"
+        if self.accelerator in HIGH_MEM_ONLY_ACCELERATORS:
+            # L4/V5E1/V6E1 only exist as High-RAM machines on Colab.
+            # Persist 'hm' in DB/models; ColabClient.assign() omits shape=hm on the HTTP wire.
+            self.shape = "hm"
         return self
 
 
@@ -265,11 +281,23 @@ class SyncResultResponse(BaseModel):
 class JobCreate(BaseModel):
     name: str
     target_accelerator: AcceleratorType
+    target_shape: MachineShape = "standard"
     allow_fallback: bool = True
     template_id: Optional[str] = None
     job_type: JobType = "python"
     entry_path_or_cmd: str
     args: List[str] = Field(default_factory=list)
+
+    @field_validator("target_accelerator", mode="before")
+    @classmethod
+    def _normalize_target_accelerator(cls, v: Any) -> Any:
+        return normalize_accelerator_value(v)
+
+    @model_validator(mode="after")
+    def validate_high_ram_rules(self) -> JobCreate:
+        if self.target_accelerator in HIGH_MEM_ONLY_ACCELERATORS:
+            self.target_shape = "hm"
+        return self
 
 
 class JobResponse(BaseModel):
@@ -277,6 +305,7 @@ class JobResponse(BaseModel):
     name: str
     session_id: Optional[str] = None
     target_accelerator: str
+    target_shape: str = "standard"
     allow_fallback: bool
     template_id: Optional[str] = None
     job_type: str
@@ -295,6 +324,7 @@ class JobInDB(BaseModel):
     name: str
     session_id: Optional[str] = None
     target_accelerator: str
+    target_shape: str = "standard"
     allow_fallback: int
     template_id: Optional[str] = None
     job_type: str
