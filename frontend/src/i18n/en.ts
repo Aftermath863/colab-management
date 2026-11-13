@@ -248,9 +248,11 @@ export const en = {
     tabS3: 'S3 / Cloudflare R2',
     tabHf: 'Hugging Face Hub',
     grantConsent: 'Grant Consent in Browser',
+    confirmConsentAndMount: "I've Authorized, Complete Mount",
     gdrivePropagating: 'Executing Google Drive credential propagation handshake...',
+    gdriveCompletingMount: 'Authorization detected — propagating credentials and mounting /content/drive...',
     gdriveAuthRequired:
-      'Google Drive authorization required. Click below to grant permissions in your browser, then retry.',
+      'Google Drive authorization required. Complete authorization in the Google popup (seeing "Please close this tab / window." means authorization succeeded), then close that window or click "Complete Mount" below.',
     gdriveSuccess: 'Google Drive credentials propagated successfully! Runtime /content/drive is mounted and accessible.',
     gdriveFailed: 'Google Drive propagation failed.',
     gdriveInfoTitle: 'Official Credentials Propagation:',

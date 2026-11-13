@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel
@@ -100,7 +101,9 @@ async def propagate_gdrive(
     """Execute official Google Drive credentials propagation on session runtime."""
     dryrun = req.dryrun if req else False
     try:
-        return storage_wizard.propagate_gdrive_credentials(session_id, dryrun=dryrun)
+        res = await asyncio.to_thread(
+            storage_wizard.propagate_gdrive_credentials, session_id, dryrun
+        )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
@@ -108,6 +111,17 @@ async def propagate_gdrive(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Google Drive credential propagation failed: {e}",
         )
+
+    if not dryrun and res.get("success") and res.get("status") == "PROPAGATED":
+        fuse_res = await storage_wizard.mount_gdrive_fuse_via_ssh(session_id, "/content/drive")
+        if fuse_res.get("error"):
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Google Drive credential propagation failed: {fuse_res['error']}",
+            )
+        res["mount"] = fuse_res
+
+    return res
 
 
 @router.post("/mount/{session_id}")
@@ -118,13 +132,16 @@ async def mount_storage(
 ):
     """Mount cloud storage profile (GDrive, S3/R2 rclone, HF token) onto session."""
     try:
-        res = storage_wizard.mount_profile_on_session(session_id, req.profile_id)
+        res = await asyncio.to_thread(
+            storage_wizard.mount_profile_on_session, session_id, req.profile_id
+        )
         if not res.get("success"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=res.get("error", "Storage mount failed"),
             )
-        return res
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
@@ -132,6 +149,21 @@ async def mount_storage(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to mount storage: {e}",
         )
+
+    if res.get("type") == "gdrive":
+        fuse_res = await storage_wizard.mount_gdrive_fuse_via_ssh(
+            session_id, res.get("mount_path") or "/content/drive"
+        )
+        if fuse_res.get("error"):
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Failed to mount storage: {fuse_res['error']}",
+            )
+        res["mount"] = fuse_res
+        if fuse_res.get("mounted"):
+            res["mount_verified"] = True
+
+    return res
 
 
 @router.get("/verify/{session_id}/{profile_id}")

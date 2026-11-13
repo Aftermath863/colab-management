@@ -161,8 +161,51 @@ def delete_storage_profile(profile_id: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# 2. Google Drive Authorization Propagation Flow
+# 2. Google Drive Authorization Propagation Flow & VM FUSE Mount
 # ---------------------------------------------------------------------------
+
+def _get_gdrive_xsrf_token(
+    colab: ColabClient,
+    url: str,
+    params: Dict[str, str],
+    headers: Dict[str, str],
+) -> str:
+    """Probe GET /tun/m/credentials-propagation/{endpoint} to retrieve an XSRF token."""
+    get_resp = colab.session.get(url, params=params, headers=headers, timeout=colab.timeout)
+    if not get_resp.ok:
+        raise ColabClientError(
+            f"GDrive probe GET failed: HTTP {get_resp.status_code}",
+            status_code=get_resp.status_code,
+        )
+    get_data = json.loads(strip_xssi_prefix(get_resp.text))
+    xsrf_token = get_data.get("token")
+    if not xsrf_token:
+        raise ColabClientError("Missing token in GDrive probe GET response")
+    return xsrf_token
+
+
+def _probe_gdrive_consent_url(
+    colab: ColabClient,
+    url: str,
+    base_params: Dict[str, str],
+    headers: Dict[str, str],
+    files: Dict[str, Any],
+    xsrf_token: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Run dryrun=true probe to check existing consent or retrieve unauthorized_redirect_uri."""
+    token = xsrf_token or _get_gdrive_xsrf_token(colab, url, base_params, headers)
+    probe_params = {**base_params, "dryrun": "true"}
+    post_headers = {**headers, "X-Goog-Colab-Token": token}
+    resp = colab.session.post(
+        url, params=probe_params, headers=post_headers, files=files, timeout=colab.timeout
+    )
+    if not resp.ok:
+        raise ColabClientError(
+            f"GDrive probe POST failed: HTTP {resp.status_code}",
+            status_code=resp.status_code,
+        )
+    return json.loads(strip_xssi_prefix(resp.text))
+
 
 def propagate_gdrive_credentials(
     session_id: str,
@@ -172,9 +215,11 @@ def propagate_gdrive_credentials(
     """Execute 2-step XSRF credentials propagation flow against Colab control plane.
 
     1. GET /tun/m/credentials-propagation/{endpoint} -> Receive XSRF token.
-    2. POST with X-Goog-Colab-Token and multipart file_id=(None, 'empty.ipynb') (dryrun=true).
-       If authorization is required, returns unauthorized_redirect_uri.
-    3. If dryrun=false, POST again with dryrun=false to finalize mount.
+    2. For dryrun=true: POST with dryrun=true to check consent status or obtain redirect URI.
+    3. For dryrun=false: POST directly with dryrun=false (since authtype=dfs_ephemeral with
+       record=false keeps returning success=false on dryrun=true even after browser consent).
+       If dryrun=false indicates authorization is still required, extract redirect URI and
+       return AUTH_REQUIRED.
     """
     colab = client or ColabClient()
     sess = session_manager.get_session_internal(session_id)
@@ -186,7 +231,7 @@ def propagate_gdrive_credentials(
     access_token = account_pool.get_valid_access_token(account_id)
 
     url = f"{colab.base_url}/tun/m/credentials-propagation/{endpoint}"
-    params = {
+    base_params = {
         "authuser": "0",
         "authtype": "dfs_ephemeral",
         "version": "2",
@@ -199,62 +244,159 @@ def propagate_gdrive_credentials(
         "Accept": "application/json",
         "X-Colab-Client-Agent": "colab-cli",
     }
+    files = {"file_id": (None, "empty.ipynb")}
 
     # Step 1: Probe GET to receive XSRF token
-    get_resp = colab.session.get(url, params=params, headers=headers, timeout=colab.timeout)
-    if not get_resp.ok:
-        raise ColabClientError(
-            f"GDrive probe GET failed: HTTP {get_resp.status_code}",
-            status_code=get_resp.status_code,
-        )
-
-    get_data = json.loads(strip_xssi_prefix(get_resp.text))
-    xsrf_token = get_data.get("token")
-    if not xsrf_token:
-        raise ColabClientError("Missing token in GDrive probe GET response")
-
-    # Step 2: Probe POST with dryrun=true and multipart file_id
+    xsrf_token = _get_gdrive_xsrf_token(colab, url, base_params, headers)
     post_headers = {**headers, "X-Goog-Colab-Token": xsrf_token}
-    files = {"file_id": (None, "empty.ipynb")}
-    post1_resp = colab.session.post(
-        url, params=params, headers=post_headers, files=files, timeout=colab.timeout
-    )
-    if not post1_resp.ok:
-        raise ColabClientError(
-            f"GDrive probe POST failed: HTTP {post1_resp.status_code}",
-            status_code=post1_resp.status_code,
-        )
 
-    post1_data = json.loads(strip_xssi_prefix(post1_resp.text))
-    if not post1_data.get("success"):
-        redirect_uri = post1_data.get("unauthorized_redirect_uri")
+    if dryrun:
+        probe_data = _probe_gdrive_consent_url(
+            colab, url, base_params, headers, files, xsrf_token=xsrf_token
+        )
+        if not probe_data.get("success"):
+            return {
+                "status": "AUTH_REQUIRED",
+                "success": False,
+                "redirect_url": probe_data.get("unauthorized_redirect_uri"),
+            }
+        return {"status": "AUTHORIZED", "success": True, "redirect_url": None}
+
+    # Step 2 (dryrun=false): Attempt actual credential propagation directly
+    final_params = {**base_params, "dryrun": "false"}
+    post_resp = colab.session.post(
+        url, params=final_params, headers=post_headers, files=files, timeout=colab.timeout
+    )
+    if post_resp.ok:
+        post_data = json.loads(strip_xssi_prefix(post_resp.text))
+        if post_data.get("success"):
+            return {
+                "status": "PROPAGATED",
+                "success": True,
+                "details": post_data,
+            }
+        redirect_uri = post_data.get("unauthorized_redirect_uri") or ""
+        if not redirect_uri:
+            try:
+                probe_data = _probe_gdrive_consent_url(
+                    colab, url, base_params, headers, files
+                )
+                redirect_uri = probe_data.get("unauthorized_redirect_uri") or ""
+            except Exception:
+                pass
         return {
             "status": "AUTH_REQUIRED",
             "success": False,
             "redirect_url": redirect_uri,
         }
 
-    # If caller only requested dryrun, return verified
-    if dryrun:
-        return {"status": "AUTHORIZED", "success": True, "redirect_url": None}
+    # Fallback probe if dryrun=false returned non-2xx before consent was granted
+    try:
+        probe_data = _probe_gdrive_consent_url(colab, url, base_params, headers, files)
+        redirect_uri = probe_data.get("unauthorized_redirect_uri")
+        if not probe_data.get("success") and redirect_uri:
+            return {
+                "status": "AUTH_REQUIRED",
+                "success": False,
+                "redirect_url": redirect_uri,
+            }
+    except Exception:
+        pass
 
-    # Step 3: Finalize commit with dryrun=false
-    params["dryrun"] = "false"
-    post2_resp = colab.session.post(
-        url, params=params, headers=post_headers, files=files, timeout=colab.timeout
+    raise ColabClientError(
+        f"GDrive finalize POST failed: HTTP {post_resp.status_code}",
+        status_code=post_resp.status_code,
     )
-    if not post2_resp.ok:
-        raise ColabClientError(
-            f"GDrive finalize POST failed: HTTP {post2_resp.status_code}",
-            status_code=post2_resp.status_code,
-        )
 
-    post2_data = json.loads(strip_xssi_prefix(post2_resp.text))
-    return {
-        "status": "PROPAGATED",
-        "success": True,
-        "details": post2_data,
-    }
+
+async def mount_gdrive_fuse_via_ssh(
+    session_id: str,
+    mount_path: str = "/content/drive",
+) -> Dict[str, Any]:
+    """Mount Google Drive FUSE inside the Colab VM using the active SSH multiplexer."""
+    from backend.app.services.ssh_multiplexer import UpstreamSSHError, ssh_multiplexer_service
+
+    gateway = ssh_multiplexer_service.get_gateway(session_id)
+    if gateway is None:
+        return {"mounted": False, "skipped": True}
+
+    sess = session_manager.get_session_internal(session_id)
+    proxy_url = (sess or {}).get("proxy_url", "")
+    is_local_mock = proxy_url.startswith(("http://127.0.0.1", "http://localhost"))
+
+    remote_script = (
+        "import json, os, sys\n"
+        f"mount_path = {json.dumps(mount_path)}\n"
+        "if not os.path.exists('/var/colab/hostname'):\n"
+        "    print(json.dumps({'mounted': False, 'skipped': True}))\n"
+        "    sys.exit(0)\n"
+        "mydrive_ok = (\n"
+        "    os.path.isdir(os.path.join(mount_path, 'MyDrive'))\n"
+        "    or os.path.isdir(os.path.join(mount_path, 'My Drive'))\n"
+        "    or (os.path.ismount(mount_path) and os.path.isdir(mount_path) and bool(os.listdir(mount_path)))\n"
+        ")\n"
+        "if mydrive_ok:\n"
+        "    print(json.dumps({'mounted': True, 'already_mounted': True}))\n"
+        "    sys.exit(0)\n"
+        "env1 = {}\n"
+        "try:\n"
+        "    raw = open('/proc/1/environ', 'rb').read().decode('utf-8', 'ignore').split('\\0')\n"
+        "    for item in raw:\n"
+        "        if '=' in item:\n"
+        "            k, v = item.split('=', 1)\n"
+        "            env1[k] = v\n"
+        "except Exception:\n"
+        "    pass\n"
+        "ephem_addr = env1.get('TBE_EPHEM_CREDS_ADDR')\n"
+        "if not ephem_addr:\n"
+        "    raise RuntimeError('Missing TBE_EPHEM_CREDS_ADDR in Colab container environment')\n"
+        "os.environ['HOME'] = env1.get('HOME', '/root')\n"
+        "os.environ['CLOUDSDK_CONFIG'] = env1.get('CLOUDSDK_CONFIG', '/content/.config')\n"
+        "os.environ['TBE_EPHEM_CREDS_ADDR'] = ephem_addr\n"
+        "os.environ['TBE_CREDS_ADDR'] = ephem_addr\n"
+        "from google.colab import drive\n"
+        "drive._output.clear = lambda *a, **kw: None\n"
+        "drive._mount(mount_path, force_remount=False, timeout_ms=80000, ephemeral=False)\n"
+        "verified = (\n"
+        "    os.path.isdir(os.path.join(mount_path, 'MyDrive'))\n"
+        "    or os.path.isdir(os.path.join(mount_path, 'My Drive'))\n"
+        "    or os.path.ismount(mount_path)\n"
+        ")\n"
+        "print(json.dumps({'mounted': bool(verified), 'already_mounted': False}))\n"
+    )
+    cmd = f"python3 -c {json.dumps(remote_script)}"
+
+    try:
+        proc = await gateway.run_command(cmd, timeout=95.0)
+    except (UpstreamSSHError, OSError, asyncio.TimeoutError) as e:
+        if is_local_mock:
+            return {"mounted": False, "skipped": True}
+        return {"mounted": False, "error": str(e)}
+
+    stdout_text = (
+        proc.stdout
+        if isinstance(proc.stdout, str)
+        else (proc.stdout.decode("utf-8", errors="replace") if proc.stdout else "")
+    )
+    stderr_text = (
+        proc.stderr
+        if isinstance(proc.stderr, str)
+        else (proc.stderr.decode("utf-8", errors="replace") if proc.stderr else "")
+    )
+
+    if proc.exit_status != 0:
+        err_detail = (stderr_text or stdout_text or f"DriveFS mount exited with status {proc.exit_status}").strip()
+        return {"mounted": False, "error": err_detail}
+
+    for line in reversed(stdout_text.strip().splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                return json.loads(line)
+            except Exception:
+                pass
+
+    return {"mounted": False, "error": "Unexpected output from DriveFS mount helper"}
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +524,15 @@ def mount_profile_on_session(
     try:
         if prof_type == "gdrive":
             prop_res = propagate_gdrive_credentials(session_id, dryrun=False, client=colab)
+            if not prop_res.get("success"):
+                return {
+                    "success": False,
+                    "profile_id": profile_id,
+                    "type": "gdrive",
+                    "mount_path": mount_path,
+                    "propagation": prop_res,
+                    "error": "Google Drive authorization required",
+                }
             # Ensure mount path directory exists in remote VFS
             rel = mount_path[len("/content/"):] if mount_path.startswith("/content/") else mount_path
             ensure_remote_directory(colab, proxy_url, proxy_token, rel)

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Cloud, HardDrive, Database, CheckCircle2, AlertCircle, X, ExternalLink, RefreshCw } from 'lucide-react';
 import { api } from '../services/api';
 import { StorageProfile } from '../types';
@@ -24,6 +24,8 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
 
   // Status & notifications
   const [loading, setLoading] = useState(false);
+  const [awaitingConsent, setAwaitingConsent] = useState(false);
+  const popupRef = useRef<Window | null>(null);
   const [statusMsg, setStatusMsg] = useState<{
     type: 'success' | 'error' | 'info';
     msg: LocalizedText;
@@ -47,6 +49,8 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
     if (isOpen) {
       loadProfiles();
       setStatusMsg(null);
+      setAwaitingConsent(false);
+      popupRef.current = null;
     }
   }, [isOpen]);
 
@@ -59,33 +63,67 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
     }
   };
 
-  const handleGDrivePropagate = async (dryrun = false) => {
-    setLoading(true);
-    setStatusMsg({ type: 'info', msg: { key: 'storageModal.gdrivePropagating' } });
-    try {
-      const res = await api.propagateGDrive(sessionId, dryrun);
-      if (res.status === 'AUTH_REQUIRED' && res.redirect_url) {
-        setStatusMsg({
-          type: 'info',
-          msg: { key: 'storageModal.gdriveAuthRequired' },
-          link: res.redirect_url,
-        });
-      } else {
-        setStatusMsg({
-          type: 'success',
-          msg: { key: 'storageModal.gdriveSuccess' },
-        });
-        if (onStorageMounted) onStorageMounted();
-      }
-    } catch (err: any) {
-      setStatusMsg({
-        type: 'error',
-        msg: err.message ? { raw: err.message } : { key: 'storageModal.gdriveFailed' },
-      });
-    } finally {
-      setLoading(false);
+  const openConsentPopup = (url: string) => {
+    if (typeof window === 'undefined' || typeof window.open !== 'function') return;
+    const popup = window.open(url, 'colab_gdrive_consent', 'width=580,height=700,noopener=no');
+    if (popup) {
+      popupRef.current = popup;
     }
   };
+
+  const handleGDrivePropagate = useCallback(
+    async (dryrun = false, postConsent = false) => {
+      setLoading(true);
+      setAwaitingConsent(false);
+      setStatusMsg({
+        type: 'info',
+        msg: { key: postConsent ? 'storageModal.gdriveCompletingMount' : 'storageModal.gdrivePropagating' },
+      });
+      try {
+        const res = await api.propagateGDrive(sessionId, dryrun);
+        if (res.status === 'AUTH_REQUIRED' && res.redirect_url) {
+          setStatusMsg({
+            type: 'info',
+            msg: { key: 'storageModal.gdriveAuthRequired' },
+            link: res.redirect_url,
+          });
+          setAwaitingConsent(true);
+          if (!postConsent) {
+            openConsentPopup(res.redirect_url);
+          }
+        } else {
+          popupRef.current = null;
+          setStatusMsg({
+            type: 'success',
+            msg: { key: 'storageModal.gdriveSuccess' },
+          });
+          if (onStorageMounted) onStorageMounted();
+        }
+      } catch (err: any) {
+        popupRef.current = null;
+        setStatusMsg({
+          type: 'error',
+          msg: err.message ? { raw: err.message } : { key: 'storageModal.gdriveFailed' },
+        });
+      } finally {
+        setLoading(false);
+      }
+    },
+    [sessionId, onStorageMounted]
+  );
+
+  // Automatically finalize credential propagation once the user closes the Google consent popup
+  useEffect(() => {
+    if (!isOpen || !awaitingConsent || loading) return;
+    const timer = window.setInterval(() => {
+      if (popupRef.current && popupRef.current.closed) {
+        popupRef.current = null;
+        setAwaitingConsent(false);
+        void handleGDrivePropagate(false, true);
+      }
+    }, 900);
+    return () => window.clearInterval(timer);
+  }, [isOpen, awaitingConsent, loading, handleGDrivePropagate]);
 
   const handleMountExistingProfile = async () => {
     if (!selectedProfileId) return;
@@ -271,20 +309,31 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
                 <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5" />
               ) : statusMsg.type === 'error' ? (
                 <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+              ) : statusMsg.link && !loading ? (
+                <ExternalLink className="w-5 h-5 shrink-0 mt-0.5" />
               ) : (
                 <RefreshCw className="w-5 h-5 shrink-0 mt-0.5 animate-spin" />
               )}
-              <div className="space-y-2">
+              <div className="space-y-3 flex-1">
                 <p>{tm(statusMsg.msg)}</p>
                 {statusMsg.link && (
-                  <a
-                    href={statusMsg.link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-xs font-medium transition-colors"
-                  >
-                    {t('storageModal.grantConsent')} <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => openConsentPopup(statusMsg.link!)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-xs font-medium transition-colors"
+                    >
+                      {t('storageModal.grantConsent')} <ExternalLink className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={loading}
+                      onClick={() => void handleGDrivePropagate(false, true)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded text-xs font-medium transition-colors"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" /> {t('storageModal.confirmConsentAndMount')}
+                    </button>
+                  </div>
                 )}
               </div>
             </div>

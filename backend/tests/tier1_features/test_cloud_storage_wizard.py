@@ -15,6 +15,7 @@ import os
 import tempfile
 import time
 import unittest
+from unittest.mock import MagicMock
 
 import httpx
 
@@ -210,3 +211,56 @@ class TestCloudStorageWizard(unittest.TestCase):
             # 3. Delete Profile via API
             del_resp = client.delete(f"/api/storage/profiles/{prof_id}", headers=self.headers)
             self.assertEqual(del_resp.status_code, 204)
+
+    def test_gdrive_ephemeral_consent_succeeds_when_dryrun_true_stays_false(self):
+        """Ensure dryrun=false is attempted directly when dryrun=false, since Colab's
+        dfs_ephemeral endpoint continues returning success=false for dryrun=true after consent.
+        """
+        sess = session_manager.create_session(
+            SessionCreateRequest(name="gdrive-ephem", accelerator="T4", account_id=self.account_id)
+        )
+        session_id = sess["id"]
+
+        mock_client = MagicMock()
+        mock_client.base_url = "https://colab.mock.local"
+        mock_client.timeout = 10
+
+        def make_resp(payload: dict):
+            r = MagicMock()
+            r.ok = True
+            r.status_code = 200
+            r.text = ")]}'\n" + json.dumps(payload)
+            return r
+
+        mock_client.session.get.return_value = make_resp({"token": "xsrf-ephem-1"})
+        consent_uri = "https://accounts.google.com/o/oauth2/v2/auth?redirect_uri=authorize-for-drive-credentials-ephem"
+
+        final_call_count = 0
+
+        def post_side_effect(url, params=None, headers=None, files=None, timeout=None):
+            nonlocal final_call_count
+            if params.get("dryrun") == "true":
+                # Simulate real Colab behavior where ephemeral dryrun=true always stays false
+                return make_resp({"success": False, "unauthorized_redirect_uri": consent_uri})
+            final_call_count += 1
+            if final_call_count == 1:
+                return make_resp({"success": False, "unauthorized_redirect_uri": consent_uri})
+            return make_resp({"success": True, "unauthorized_redirect_uri": ""})
+
+        mock_client.session.post.side_effect = post_side_effect
+
+        # Call #1 (before browser consent): returns AUTH_REQUIRED + redirect_url
+        res1 = storage_wizard.propagate_gdrive_credentials(
+            session_id, dryrun=False, client=mock_client
+        )
+        self.assertEqual(res1["status"], "AUTH_REQUIRED")
+        self.assertFalse(res1["success"])
+        self.assertEqual(res1["redirect_url"], consent_uri)
+
+        # Call #2 (after browser shows "Please close this tab / window."): succeeds!
+        res2 = storage_wizard.propagate_gdrive_credentials(
+            session_id, dryrun=False, client=mock_client
+        )
+        self.assertEqual(res2["status"], "PROPAGATED")
+        self.assertTrue(res2["success"])
+        self.assertEqual(final_call_count, 2)
