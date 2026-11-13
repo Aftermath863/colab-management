@@ -1,0 +1,104 @@
+# ==============================================================================
+# Colab Management Platform — .gitignore
+# ==============================================================================
+
+# --- Operating System & Editor Artifacts ---
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# --- Python Build, Distribution & Bytecode ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# --- Python Virtual Environments ---
+.venv/
+venv/
+ENV/
+env/
+venv*/
+.env*/
+
+# --- Testing, Coverage & Linters ---
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+.mypy_cache/
+.ruff_cache/
+
+# --- Node.js & Vite Frontend ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+frontend/dist/
+dist/
+.vite/
+
+# --- Runtime Data, SQLite WAL & Application Logs ---
+/data/*
+!/data/.gitkeep
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+logs/
+*.log
+
+# --- Local Workspace Directory ---
+/workspace/*
+!/workspace/.gitkeep
+
+# --- Security, Keys & Sensitive Environment Variables ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.crt
+id_rsa*
+id_ed25519*
+id_ecdsa*
+
+# --- Multi-Agent Scratch, Incremental Build Cache & Master Key ---
+.agents/
+TEST_READY.md
+*.tsbuildinfo
+.master_key

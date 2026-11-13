@@ -1,0 +1,183 @@
+import React, { useState } from 'react';
+import { Cpu, Play, Square, ExternalLink, Terminal } from 'lucide-react';
+import { Session } from '../types';
+
+interface Props {
+  sessions: Session[];
+  onOpenSession: (session: Session) => void;
+  onNewSession: () => void;
+  onStopSession: (sessionId: string) => Promise<void>;
+  onRefresh: () => Promise<void>;
+}
+
+export const SessionsPage: React.FC<Props> = ({
+  sessions,
+  onOpenSession,
+  onNewSession,
+  onStopSession,
+  onRefresh,
+}) => {
+  const [filter, setFilter] = useState<'all' | 'active' | 'stopped'>('all');
+  const [stoppingId, setStoppingId] = useState<string | null>(null);
+
+  const filteredSessions = sessions.filter((s) => {
+    if (filter === 'active') return s.status !== 'STOPPED' && s.status !== 'FAILED';
+    if (filter === 'stopped') return s.status === 'STOPPED' || s.status === 'FAILED';
+    return true;
+  });
+
+  const handleStop = async (sessionId: string) => {
+    if (!confirm('Are you sure you want to stop this runtime? Unsaved memory state will be lost.')) {
+      return;
+    }
+    setStoppingId(sessionId);
+    try {
+      await onStopSession(sessionId);
+      await onRefresh();
+    } catch (err: any) {
+      alert(`Failed to stop session: ${err.message}`);
+    } finally {
+      setStoppingId(null);
+    }
+  };
+
+  return (
+    <div className="p-8 max-w-7xl mx-auto space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-white tracking-tight">Compute Sessions</h2>
+          <p className="text-sm text-slate-400 mt-1">
+            Provision, inspect, and interact with running Colab instances.
+          </p>
+        </div>
+
+        <button
+          onClick={onNewSession}
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium text-white transition flex items-center gap-2 shadow-lg shadow-blue-600/20"
+        >
+          <Play className="w-4 h-4 fill-current" /> Launch Runtime
+        </button>
+      </div>
+
+      {/* Filter Tabs */}
+      <div className="flex items-center gap-2 border-b border-slate-750 pb-3">
+        {(['all', 'active', 'stopped'] as const).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setFilter(tab)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wider transition ${
+              filter === tab
+                ? 'bg-slate-800 text-blue-400 border border-slate-700'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            {tab} ({sessions.filter((s) => {
+              if (tab === 'active') return s.status !== 'STOPPED' && s.status !== 'FAILED';
+              if (tab === 'stopped') return s.status === 'STOPPED' || s.status === 'FAILED';
+              return true;
+            }).length})
+          </button>
+        ))}
+      </div>
+
+      {/* Sessions Table */}
+      <div className="bg-slate-800/80 border border-slate-750 rounded-xl overflow-hidden">
+        {filteredSessions.length === 0 ? (
+          <div className="p-12 text-center text-slate-500">
+            No sessions match the selected filter.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm text-slate-300">
+              <thead className="bg-slate-850 text-xs uppercase font-semibold text-slate-400 border-b border-slate-750">
+                <tr>
+                  <th className="px-6 py-3">Session</th>
+                  <th className="px-6 py-3">Accelerator</th>
+                  <th className="px-6 py-3">Account</th>
+                  <th className="px-6 py-3">Status</th>
+                  <th className="px-6 py-3">SSH Port</th>
+                  <th className="px-6 py-3">Created</th>
+                  <th className="px-6 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-750">
+                {filteredSessions.map((sess) => {
+                  const isActive = sess.status !== 'STOPPED' && sess.status !== 'FAILED';
+                  return (
+                    <tr key={sess.id} className="hover:bg-slate-750/50 transition">
+                      <td className="px-6 py-4 font-medium text-white flex items-center gap-2">
+                        {isActive && <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />}
+                        {sess.name}
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="px-2 py-0.5 text-xs font-mono bg-blue-900/60 text-blue-300 rounded border border-blue-700/50">
+                          {sess.accelerator} ({sess.shape})
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-xs font-mono text-slate-400">
+                        {sess.account_email || sess.account_id}
+                      </td>
+                      <td className="px-6 py-4">
+                        <span
+                          className={`px-2 py-0.5 text-xs font-semibold rounded ${
+                            sess.status === 'READY' || sess.status === 'BUSY'
+                              ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                              : sess.status === 'ORPHAN'
+                              ? 'bg-amber-950 text-amber-400 border border-amber-800'
+                              : 'bg-slate-800 text-slate-400 border border-slate-700'
+                          }`}
+                        >
+                          {sess.status}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-xs font-mono">
+                        {sess.ssh_local_port ? (
+                          <span className="text-slate-200">localhost:{sess.ssh_local_port}</span>
+                        ) : (
+                          <span className="text-slate-500">—</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 text-xs text-slate-400">
+                        {sess.created_at?.split(' ')[0] || 'Recently'}
+                      </td>
+                      <td className="px-6 py-4 text-right space-x-2">
+                        {sess.colab_web_url && (
+                          <a
+                            href={sess.colab_web_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-600/80 hover:bg-amber-600 rounded text-xs font-medium text-white transition"
+                          >
+                            <ExternalLink className="w-3 h-3" /> Colab
+                          </a>
+                        )}
+
+                        {isActive && (
+                          <>
+                            <button
+                              onClick={() => onOpenSession(sess)}
+                              className="px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded text-xs font-medium text-white transition inline-flex items-center gap-1"
+                            >
+                              <Terminal className="w-3 h-3" /> Workbench
+                            </button>
+                            <button
+                              onClick={() => handleStop(sess.id)}
+                              disabled={stoppingId === sess.id}
+                              className="px-2.5 py-1 bg-red-950/60 hover:bg-red-900 border border-red-800/60 rounded text-xs text-red-300 transition"
+                            >
+                              <Square className="w-3 h-3 fill-current inline" />
+                            </button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
