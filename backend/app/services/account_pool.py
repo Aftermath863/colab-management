@@ -6,6 +6,7 @@ token refresh, CCU quota polling, orphan instance discovery, and account auto-se
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import json
@@ -30,6 +31,19 @@ _PKCE_LOCK = threading.Lock()
 _PKCE_TTL_SEC = 1800
 # state -> (code_verifier, created_at)
 _PENDING_PKCE_FLOWS: Dict[str, Tuple[str, float]] = {}
+
+_SYNC_LOCKS_GUARD = threading.Lock()
+_ACCOUNT_SYNC_LOCKS: Dict[str, threading.Lock] = {}
+
+
+def _get_account_sync_lock(account_id: str) -> threading.Lock:
+    """Return a per-account mutex so concurrent manual/scheduled syncs serialize cleanly."""
+    with _SYNC_LOCKS_GUARD:
+        lock = _ACCOUNT_SYNC_LOCKS.get(account_id)
+        if lock is None:
+            lock = threading.Lock()
+            _ACCOUNT_SYNC_LOCKS[account_id] = lock
+        return lock
 
 
 def _prune_expired_pkce_locked(now: float) -> None:
@@ -264,6 +278,12 @@ def get_account(account_id: str) -> Optional[Dict[str, Any]]:
 
 def sync_account(account_id: str, client: Optional[ColabClient] = None) -> Dict[str, Any]:
     """Poll CCU and active assignments for account, reconciling orphans and renewing tokens."""
+    with _get_account_sync_lock(account_id):
+        return _sync_account_locked(account_id, client=client)
+
+
+def _sync_account_locked(account_id: str, client: Optional[ColabClient] = None) -> Dict[str, Any]:
+    """Synchronize single account state against Google Colab under per-account lock."""
     token = get_valid_access_token(account_id)
     colab = client or ColabClient()
 
@@ -353,6 +373,24 @@ def sync_account(account_id: str, client: Optional[ColabClient] = None) -> Dict[
     return get_account(account_id)  # type: ignore
 
 
+def sync_all_accounts(client: Optional[ColabClient] = None) -> List[Dict[str, Any]]:
+    """Synchronize CCU quota, burn rate, and assignments across all non-expired accounts."""
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, status FROM accounts ORDER BY priority DESC, id ASC"
+        ).fetchall()
+
+    for row in rows:
+        if row["status"] == "AUTH_EXPIRED":
+            continue
+        try:
+            sync_account(row["id"], client=client)
+        except Exception as exc:
+            logger.warning("Periodic/bulk sync failed for account %s: %s", row["id"], exc)
+
+    return list_accounts()
+
+
 def delete_account(account_id: str) -> bool:
     """Delete account and cascade delete its sessions."""
     with get_db() as conn:
@@ -402,3 +440,87 @@ def select_account(preferred_account_id: Optional[str] = None) -> str:
 
         scored.sort(key=lambda x: x[0], reverse=True)
         return scored[0][1]
+
+
+class AccountPoolSyncService:
+    """Periodic background CCU balance & burn-rate synchronization daemon."""
+
+    def __init__(
+        self,
+        poll_interval_sec: Optional[float] = None,
+        initial_delay_sec: float = 2.0,
+    ):
+        self.poll_interval_sec: Optional[float] = poll_interval_sec
+        self.initial_delay_sec: float = initial_delay_sec
+        self._running: bool = False
+        self._stop_event: Optional[asyncio.Event] = None
+        self._task: Optional[asyncio.Task[None]] = None
+
+    def _effective_interval(self) -> float:
+        raw = (
+            self.poll_interval_sec
+            if self.poll_interval_sec is not None
+            else settings.CCU_POLL_INTERVAL_SEC
+        )
+        return max(0.05, float(raw))
+
+    async def sync_once(self) -> List[Dict[str, Any]]:
+        """Execute a single non-blocking sync pass across all eligible accounts."""
+        return await asyncio.to_thread(sync_all_accounts)
+
+    async def start(self, allow_in_test_mode: bool = False) -> None:
+        """Start periodic CCU sync background task (skipped in TEST_MODE unless allowed)."""
+        if self._running:
+            return
+        if settings.TEST_MODE and not allow_in_test_mode:
+            logger.debug("AccountPoolSyncService auto-start skipped in TEST_MODE.")
+            return
+        self._running = True
+        self._stop_event = asyncio.Event()
+        self._task = asyncio.create_task(self._run_loop())
+        logger.info(
+            "AccountPoolSyncService started (interval=%ss).", self._effective_interval()
+        )
+
+    async def stop(self) -> None:
+        """Stop periodic CCU sync background task cleanly."""
+        if not self._running:
+            return
+        self._running = False
+        if self._stop_event:
+            self._stop_event.set()
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+            self._task = None
+        logger.info("AccountPoolSyncService stopped.")
+
+    async def _run_loop(self) -> None:
+        assert self._stop_event is not None
+        if self.initial_delay_sec > 0:
+            try:
+                await asyncio.wait_for(
+                    self._stop_event.wait(), timeout=self.initial_delay_sec
+                )
+                return
+            except asyncio.TimeoutError:
+                pass
+
+        while self._running:
+            try:
+                await self.sync_once()
+            except Exception as exc:
+                logger.warning("Scheduled CCU sync loop error: %s", exc)
+            try:
+                await asyncio.wait_for(
+                    self._stop_event.wait(), timeout=self._effective_interval()
+                )
+                break
+            except asyncio.TimeoutError:
+                pass
+
+
+account_pool_sync_service = AccountPoolSyncService()

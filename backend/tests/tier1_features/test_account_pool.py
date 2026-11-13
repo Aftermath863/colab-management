@@ -1,5 +1,6 @@
 """Integration tests for Account Pool, remote OAuth, token refresh, CCU sync, and selector."""
 
+import asyncio
 import base64
 import hashlib
 import json
@@ -8,6 +9,7 @@ import tempfile
 import time
 import unittest
 import urllib.parse
+from unittest.mock import MagicMock
 
 from backend.app.config import settings
 from backend.app.core.database import get_db, init_db
@@ -247,6 +249,101 @@ class TestAccountPool(unittest.TestCase):
             )
         self.assertTrue(account_pool.delete_account("acc_del"))
         self.assertIsNone(account_pool.get_account("acc_del"))
+
+    def test_sync_all_accounts_skips_expired_and_isolates_errors(self):
+        future_creds = json.dumps(
+            {
+                "access_token": "ya29.valid_token",
+                "refresh_token": "1//valid_refresh",
+                "expires_at": time.time() + 3600,
+            }
+        )
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO accounts (id, email, oauth_creds_enc, ccu_balance, burn_rate_hourly, priority, status)
+                VALUES ('acc_ok_1', 'ok1@colab.com', ?, 10.0, 0.0, 2, 'ACTIVE')
+                """,
+                (encrypt_secret(future_creds),),
+            )
+            conn.execute(
+                """
+                INSERT INTO accounts (id, email, oauth_creds_enc, ccu_balance, burn_rate_hourly, priority, status)
+                VALUES ('acc_ok_2', 'ok2@colab.com', ?, 20.0, 0.0, 1, 'ACTIVE')
+                """,
+                (encrypt_secret(future_creds),),
+            )
+            conn.execute(
+                """
+                INSERT INTO accounts (id, email, oauth_creds_enc, ccu_balance, burn_rate_hourly, priority, status, last_synced_at)
+                VALUES ('acc_exp', 'exp@colab.com', 'bad-secret-should-skip', 5.0, 0.0, 0, 'AUTH_EXPIRED', NULL)
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO accounts (id, email, oauth_creds_enc, ccu_balance, burn_rate_hourly, priority, status)
+                VALUES ('acc_corrupt', 'corrupt@colab.com', 'not-valid-fernet', 15.0, 0.0, 3, 'ACTIVE')
+                """
+            )
+
+        mock_client = MagicMock(spec=ColabClient)
+        mock_client.get_ccu_info.side_effect = [
+            {"current_balance": 99.5, "consumption_rate_hourly": 1.85, "assignments_count": 0},
+            {"current_balance": 42.25, "consumption_rate_hourly": 0.95, "assignments_count": 0},
+        ]
+        mock_client.list_assignments.return_value = []
+
+        results = {acc["id"]: acc for acc in account_pool.sync_all_accounts(client=mock_client)}
+        # acc_corrupt failed decrypt cleanly without aborting acc_ok_1 / acc_ok_2; acc_exp was skipped
+        self.assertAlmostEqual(results["acc_ok_1"]["ccu_balance"], 99.5, places=2)
+        self.assertAlmostEqual(results["acc_ok_1"]["burn_rate_hourly"], 1.85, places=2)
+        self.assertIsNotNone(results["acc_ok_1"]["last_synced_at"])
+        self.assertAlmostEqual(results["acc_ok_2"]["ccu_balance"], 42.25, places=2)
+        self.assertAlmostEqual(results["acc_ok_2"]["burn_rate_hourly"], 0.95, places=2)
+        self.assertAlmostEqual(results["acc_exp"]["ccu_balance"], 5.0, places=2)
+        self.assertIsNone(results["acc_exp"]["last_synced_at"])
+        self.assertEqual(mock_client.get_ccu_info.call_count, 2)
+
+    def test_periodic_sync_daemon_updates_ccu_and_stops_cleanly(self):
+        creds = json.dumps(
+            {
+                "access_token": "ya29.daemon_token",
+                "refresh_token": "1//daemon_refresh",
+                "expires_at": time.time() + 3600,
+            }
+        )
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO accounts (id, email, oauth_creds_enc, ccu_balance, burn_rate_hourly, status)
+                VALUES ('acc_daemon', 'daemon@colab.com', ?, 12.0, 0.0, 'ACTIVE')
+                """,
+                (encrypt_secret(creds),),
+            )
+
+        self.hub.control_plane.state.ccu_balance = 87.65
+        self.hub.control_plane.state.consumption_rate_hourly = 2.45
+
+        async def _run_daemon_cycle():
+            daemon = account_pool.AccountPoolSyncService(
+                poll_interval_sec=0.05,
+                initial_delay_sec=0.02,
+            )
+            await daemon.start(allow_in_test_mode=True)
+            for _ in range(40):
+                acc = account_pool.get_account("acc_daemon")
+                if acc and abs(acc["ccu_balance"] - 87.65) < 0.01:
+                    break
+                await asyncio.sleep(0.05)
+            await daemon.stop()
+
+        asyncio.run(_run_daemon_cycle())
+
+        updated = account_pool.get_account("acc_daemon")
+        self.assertIsNotNone(updated)
+        self.assertAlmostEqual(updated["ccu_balance"], 87.65, places=2)
+        self.assertAlmostEqual(updated["burn_rate_hourly"], 2.45, places=2)
+        self.assertIsNotNone(updated["last_synced_at"])
 
 
 if __name__ == "__main__":

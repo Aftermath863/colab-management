@@ -3,17 +3,47 @@ import { Users, Plus, RefreshCw, Trash2, AlertCircle } from 'lucide-react';
 import { Account } from '../types';
 import { api } from '../services/api';
 import { useI18n } from '../i18n';
+import { formatSyncTimestamp } from '../utils/time';
 
 interface Props {
   accounts: Account[];
   onRefresh: () => Promise<void>;
   onLinkAccount: () => void;
+  onSyncAll?: () => Promise<void>;
+  isSyncingAll?: boolean;
+  autoRefreshSeconds?: number;
 }
 
-export const AccountsPage: React.FC<Props> = ({ accounts, onRefresh, onLinkAccount }) => {
+export const AccountsPage: React.FC<Props> = ({
+  accounts,
+  onRefresh,
+  onLinkAccount,
+  onSyncAll,
+  isSyncingAll = false,
+  autoRefreshSeconds = 60,
+}) => {
   const { t, formatActionError, formatAccountStatus } = useI18n();
   const [syncingId, setSyncingId] = useState<string | null>(null);
+  const [localSyncingAll, setLocalSyncingAll] = useState<boolean>(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const syncingAll = isSyncingAll || localSyncingAll;
+
+  const handleSyncAll = async () => {
+    if (syncingAll) return;
+    if (onSyncAll) {
+      await onSyncAll();
+      return;
+    }
+    setLocalSyncingAll(true);
+    try {
+      await api.syncAllAccounts();
+      await onRefresh();
+    } catch (err: any) {
+      alert(formatActionError('accounts.syncFailed', err?.message));
+    } finally {
+      setLocalSyncingAll(false);
+    }
+  };
 
   const handleSync = async (accountId: string) => {
     setSyncingId(accountId);
@@ -48,15 +78,30 @@ export const AccountsPage: React.FC<Props> = ({ accounts, onRefresh, onLinkAccou
         <div>
           <h2 className="text-2xl font-bold text-white tracking-tight">{t('accounts.title')}</h2>
           <p className="text-sm text-slate-400 mt-1">{t('accounts.subtitle')}</p>
+          <p className="text-xs text-slate-500 mt-1">
+            {t('accounts.autoSyncBadge', { seconds: autoRefreshSeconds })}
+          </p>
         </div>
 
-        <button
-          type="button"
-          onClick={onLinkAccount}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium text-white transition flex items-center gap-2 shadow-lg shadow-blue-600/20"
-        >
-          <Plus className="w-4 h-4" /> {t('accounts.linkGoogleAccount')}
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            data-testid="accounts-sync-all"
+            onClick={() => void handleSyncAll()}
+            disabled={syncingAll || accounts.length === 0}
+            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-60 border border-slate-700 rounded-lg text-sm font-medium text-slate-200 transition flex items-center gap-2"
+          >
+            <RefreshCw className={`w-4 h-4 ${syncingAll ? 'animate-spin' : ''}`} />
+            {syncingAll ? t('accounts.syncingAll') : t('accounts.syncAll')}
+          </button>
+          <button
+            type="button"
+            onClick={onLinkAccount}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium text-white transition flex items-center gap-2 shadow-lg shadow-blue-600/20"
+          >
+            <Plus className="w-4 h-4" /> {t('accounts.linkGoogleAccount')}
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -129,7 +174,7 @@ export const AccountsPage: React.FC<Props> = ({ accounts, onRefresh, onLinkAccou
               <div className="flex items-center justify-between pt-3 border-t border-slate-750">
                 <span className="text-[11px] text-slate-500">
                   {acc.last_synced_at
-                    ? t('accounts.syncedAt', { date: acc.last_synced_at.split(' ')[0] })
+                    ? t('accounts.syncedAt', { date: formatSyncTimestamp(acc.last_synced_at) })
                     : t('accounts.neverSynced')}
                 </span>
 

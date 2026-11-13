@@ -109,6 +109,12 @@ export const en = {
   overview: {
     title: 'Fleet Overview',
     subtitle: 'Real-time status of compute clusters, CCU balances, and active sessions.',
+    refreshQuota: 'Refresh Quota',
+    refreshingQuota: 'Syncing...',
+    autoRefreshHint: 'Auto-syncs every {seconds}s',
+    lastSyncedAt: 'Last synced: {time}',
+    neverSynced: 'Not synced yet',
+    syncQuotaFailed: 'Failed to refresh quota: {error}',
     linkAccount: 'Link Account',
     launchRuntime: 'Launch Runtime',
     poolCcuBalance: 'Pool CCU Balance',
@@ -136,6 +142,9 @@ export const en = {
   accounts: {
     title: 'Google Account Pool',
     subtitle: 'Manage multi-tenant Google accounts, monitor CCU balances, and configure allocation priority.',
+    syncAll: 'Sync All',
+    syncingAll: 'Syncing...',
+    autoSyncBadge: 'Auto-syncs every {seconds}s',
     linkGoogleAccount: 'Link Google Account',
     ccuBalance: 'CCU Balance',
     burnRate: 'Burn Rate',

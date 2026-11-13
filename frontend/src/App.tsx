@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { LoginPage } from './pages/LoginPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { AccountsPage } from './pages/AccountsPage';
@@ -26,6 +26,8 @@ const AppContent: React.FC = () => {
   const [oauthFlow, setOauthFlow] = useState<{ authUrl: string; state?: string } | null>(null);
   const [showNewSessionModal, setShowNewSessionModal] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
+  const [isSyncingAccounts, setIsSyncingAccounts] = useState<boolean>(false);
+  const syncingAccountsRef = useRef<boolean>(false);
 
   const handleLogout = () => {
     api.logout();
@@ -55,14 +57,44 @@ const AppContent: React.FC = () => {
     }
   };
 
+  const syncPoolAccounts = async (silent = true): Promise<void> => {
+    if (!isAuthenticated || syncingAccountsRef.current) return;
+    syncingAccountsRef.current = true;
+    setIsSyncingAccounts(true);
+    try {
+      const updatedAccounts = await api.syncAllAccounts();
+      setAccounts(updatedAccounts);
+      const sess = await api.getSessions();
+      setSessions(sess);
+    } catch (err: any) {
+      if (!silent) {
+        alert(formatActionError('overview.syncQuotaFailed', err?.message));
+      } else {
+        console.error('Background CCU sync failed:', err);
+      }
+    } finally {
+      syncingAccountsRef.current = false;
+      setIsSyncingAccounts(false);
+    }
+  };
+
   useEffect(() => {
     if (isAuthenticated) {
       api.getMe().catch(() => {
         handleLogout();
       });
       refreshData();
-      const interval = setInterval(refreshData, 10000);
-      return () => clearInterval(interval);
+      void syncPoolAccounts(true);
+      const pollInterval = setInterval(refreshData, 10000);
+      const syncInterval = setInterval(() => {
+        if (typeof document === 'undefined' || !document.hidden) {
+          void syncPoolAccounts(true);
+        }
+      }, 60000);
+      return () => {
+        clearInterval(pollInterval);
+        clearInterval(syncInterval);
+      };
     }
   }, [isAuthenticated]);
 
@@ -94,12 +126,14 @@ const AppContent: React.FC = () => {
   }) => {
     const sess = await api.createSession(params);
     await refreshData();
+    void syncPoolAccounts(true);
     setSelectedSession(sess);
   };
 
   const handleStopSession = async (sessionId: string) => {
     await api.stopSession(sessionId);
     await refreshData();
+    void syncPoolAccounts(true);
     if (selectedSession?.id === sessionId) {
       setSelectedSession(null);
     }
@@ -135,6 +169,8 @@ const AppContent: React.FC = () => {
             onOpenSession={(sess) => setSelectedSession(sess)}
             onNewSession={() => setShowNewSessionModal(true)}
             onLinkAccount={handleStartOAuth}
+            onSyncAccounts={() => syncPoolAccounts(false)}
+            isSyncing={isSyncingAccounts}
           />
         )}
 
@@ -155,6 +191,8 @@ const AppContent: React.FC = () => {
             accounts={accounts}
             onRefresh={refreshData}
             onLinkAccount={handleStartOAuth}
+            onSyncAll={() => syncPoolAccounts(false)}
+            isSyncingAll={isSyncingAccounts}
           />
         )}
 

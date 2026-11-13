@@ -124,6 +124,15 @@ export const api = {
     return res.json();
   },
 
+  async syncAllAccounts(): Promise<Account[]> {
+    const res = checkResponse(await fetch(`${API_BASE}/accounts/sync-all`, {
+      method: 'POST',
+      headers: getHeaders(),
+    }));
+    if (!res.ok) throw new Error(await extractErrorDetail(res, 'Failed to sync accounts'));
+    return res.json();
+  },
+
   async syncAccount(accountId: string): Promise<Account> {
     const res = checkResponse(await fetch(`${API_BASE}/accounts/${accountId}/sync`, {
       method: 'POST',

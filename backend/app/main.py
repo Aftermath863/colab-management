@@ -53,7 +53,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Could not initialize SSH multiplexer listeners: %s", e)
 
-    # Start Phase 3 services (Lifecycle Engine, Telemetry, Job Runner)
+    # Start Phase 3 services (Account Pool Sync, Lifecycle Engine, Telemetry, Job Runner)
+    try:
+        from backend.app.services.account_pool import account_pool_sync_service
+        await account_pool_sync_service.start()
+    except Exception as e:
+        logger.warning("Could not start account pool sync service: %s", e)
+
     try:
         from backend.app.services.lifecycle_engine import lifecycle_engine
         await lifecycle_engine.start()
@@ -92,6 +98,12 @@ async def lifespan(app: FastAPI):
         await lifecycle_engine.stop()
     except Exception as e:
         logger.warning("Error stopping lifecycle engine: %s", e)
+
+    try:
+        from backend.app.services.account_pool import account_pool_sync_service
+        await account_pool_sync_service.stop()
+    except Exception as e:
+        logger.warning("Error stopping account pool sync service: %s", e)
 
     # Shutdown SSH multiplexer gateways
     try:

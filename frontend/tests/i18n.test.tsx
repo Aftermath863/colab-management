@@ -37,6 +37,7 @@ import { JobsPage } from '../src/pages/JobsPage';
 import { NotificationsPage } from '../src/pages/NotificationsPage';
 import { api } from '../src/services/api';
 import { Account, Session } from '../src/types';
+import { formatSyncTimestamp, getLatestSyncTimestamp } from '../src/utils/time';
 
 function collectLeafEntries(obj: Record<string, unknown>, prefix = ''): Map<string, string> {
   const result = new Map<string, string>();
@@ -331,7 +332,7 @@ test('API client sends Accept-Language header matching stored locale', async () 
     assert.ok(capturedHeaders['Accept-Language']?.startsWith('zh-CN'));
 
     store.set(STORAGE_KEY, 'en');
-    await api.getAccounts();
+    await api.syncAllAccounts();
     assert.ok(capturedHeaders['Accept-Language']?.startsWith('en-US'));
   } finally {
     (globalThis as any).window = origWindow;
@@ -452,7 +453,7 @@ test('All pages and modals render localized UI and LanguageSwitcher in both zh a
       />
     </I18nProvider>
   );
-  for (const label of ['算力池总览', '发现 1 个孤儿实例', '就绪', '高内存', '孤儿实例', '工作台']) {
+  for (const label of ['算力池总览', '刷新配额', '每 60 秒自动同步', '上次同步：', '发现 1 个孤儿实例', '就绪', '高内存', '孤儿实例', '工作台']) {
     assert.ok(overviewZh.includes(label), `Missing "${label}" in Chinese OverviewPage`);
   }
   assert.ok(!overviewZh.includes('Fleet Overview'));
@@ -463,9 +464,14 @@ test('All pages and modals render localized UI and LanguageSwitcher in both zh a
       <AccountsPage accounts={sampleAccounts} onRefresh={asyncNoop} onLinkAccount={noop} />
     </I18nProvider>
   );
-  for (const label of ['Google 账号池', '正常', '授权过期', '已触及熔断停机阈值', '尚未同步']) {
+  for (const label of ['Google 账号池', '全部同步', '每 60 秒自动同步', '正常', '授权过期', '已触及熔断停机阈值', '尚未同步']) {
     assert.ok(accountsZh.includes(label), `Missing "${label}" in Chinese AccountsPage`);
   }
+  const formattedTs = formatSyncTimestamp('2026-11-13 12:00:00');
+  assert.match(formattedTs, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  assert.ok(accountsZh.includes(formattedTs));
+  assert.equal(getLatestSyncTimestamp([{ last_synced_at: '2026-11-13 12:00:00' }, {}]), formattedTs);
+  assert.equal(getLatestSyncTimestamp([{}]), null);
 
   const accountsEmptyZh = renderToStaticMarkup(
     <I18nProvider initialLocale="zh">

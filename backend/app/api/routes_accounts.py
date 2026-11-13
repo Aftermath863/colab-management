@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
@@ -42,11 +43,23 @@ async def complete_oauth(req: OAuthCompleteRequest, admin=Depends(get_current_ad
         )
 
 
+@router.post("/sync-all", response_model=List[AccountSummary])
+async def sync_all_accounts_metrics(admin=Depends(get_current_admin)):
+    """Force manual synchronization of CCU quota and assignments across all eligible accounts."""
+    try:
+        return await asyncio.to_thread(account_pool.sync_all_accounts)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to sync accounts with Google Colab: {e}",
+        )
+
+
 @router.post("/{account_id}/sync", response_model=AccountSummary)
 async def sync_account_metrics(account_id: str, admin=Depends(get_current_admin)):
     """Force manual synchronization of CCU quota and orphan assignments."""
     try:
-        updated = account_pool.sync_account(account_id)
+        updated = await asyncio.to_thread(account_pool.sync_account, account_id)
         return updated
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))

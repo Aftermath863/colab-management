@@ -145,10 +145,17 @@ class TestApiEndpoints(unittest.TestCase):
         self.assertEqual(complete_resp.status_code, 200)
         self.assertEqual(complete_resp.json()["email"], "new.user@example.com")
 
-        # 4. Sync account
+        # 4. Sync single account and bulk sync-all
         sync_resp = self.client.post(f"/api/accounts/{self.account_id}/sync", headers=self.headers)
         self.assertEqual(sync_resp.status_code, 200)
         self.assertGreater(sync_resp.json()["ccu_balance"], 0.0)
+
+        sync_all_resp = self.client.post("/api/accounts/sync-all", headers=self.headers)
+        self.assertEqual(sync_all_resp.status_code, 200)
+        synced_list = sync_all_resp.json()
+        self.assertEqual(len(synced_list), 2)
+        for item in synced_list:
+            self.assertIsNotNone(item["last_synced_at"])
 
         # 5. Delete account
         del_resp = self.client.delete(f"/api/accounts/{self.account_id}", headers=self.headers)

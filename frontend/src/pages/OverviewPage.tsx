@@ -1,7 +1,9 @@
-import React from 'react';
-import { Cpu, Users, Zap, ExternalLink, Play, AlertTriangle } from 'lucide-react';
+import React, { useState } from 'react';
+import { Cpu, Users, Zap, ExternalLink, Play, AlertTriangle, RefreshCw } from 'lucide-react';
 import { Account, Session } from '../types';
+import { api } from '../services/api';
 import { useI18n } from '../i18n';
+import { getLatestSyncTimestamp } from '../utils/time';
 
 interface Props {
   accounts: Account[];
@@ -9,6 +11,9 @@ interface Props {
   onOpenSession: (session: Session) => void;
   onNewSession: () => void;
   onLinkAccount: () => void;
+  onSyncAccounts?: () => Promise<void>;
+  isSyncing?: boolean;
+  autoRefreshSeconds?: number;
 }
 
 export const OverviewPage: React.FC<Props> = ({
@@ -17,14 +22,49 @@ export const OverviewPage: React.FC<Props> = ({
   onOpenSession,
   onNewSession,
   onLinkAccount,
+  onSyncAccounts,
+  isSyncing = false,
+  autoRefreshSeconds = 60,
 }) => {
-  const { t, formatSessionStatus, formatShape } = useI18n();
+  const { t, formatActionError, formatSessionStatus, formatShape } = useI18n();
+  const [localSyncing, setLocalSyncing] = useState(false);
+  const syncing = isSyncing || localSyncing;
   const totalCcu = accounts.reduce((acc, a) => acc + a.ccu_balance, 0);
   const totalBurnRate = accounts.reduce((acc, a) => acc + a.burn_rate_hourly, 0);
   const activeSessions = sessions.filter(
     (s) => s.status !== 'STOPPED' && s.status !== 'FAILED' && s.status !== 'LOST'
   );
   const orphanSessions = sessions.filter((s) => s.status === 'ORPHAN');
+  const latestSync = getLatestSyncTimestamp(accounts);
+
+  const handleManualSync = async () => {
+    if (syncing) return;
+    if (onSyncAccounts) {
+      await onSyncAccounts();
+      return;
+    }
+    setLocalSyncing(true);
+    try {
+      await api.syncAllAccounts();
+    } catch (err: any) {
+      alert(formatActionError('overview.syncQuotaFailed', err?.message));
+    } finally {
+      setLocalSyncing(false);
+    }
+  };
+
+  const renderMetricSyncButton = () => (
+    <button
+      type="button"
+      onClick={() => void handleManualSync()}
+      disabled={syncing}
+      title={t('overview.refreshQuota')}
+      aria-label={t('overview.refreshQuota')}
+      className="p-1 rounded hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition disabled:opacity-50"
+    >
+      <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
+    </button>
+  );
 
   return (
     <div className="p-4 sm:p-8 max-w-7xl mx-auto space-y-8">
@@ -33,9 +73,28 @@ export const OverviewPage: React.FC<Props> = ({
         <div>
           <h2 className="text-2xl font-bold text-white tracking-tight">{t('overview.title')}</h2>
           <p className="text-sm text-slate-400 mt-1">{t('overview.subtitle')}</p>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 mt-1.5">
+            <span>
+              {latestSync
+                ? t('overview.lastSyncedAt', { time: latestSync })
+                : t('overview.neverSynced')}
+            </span>
+            <span aria-hidden="true">·</span>
+            <span>{t('overview.autoRefreshHint', { seconds: autoRefreshSeconds })}</span>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            data-testid="overview-refresh-quota"
+            onClick={() => void handleManualSync()}
+            disabled={syncing}
+            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-60 border border-slate-700 rounded-lg text-sm font-medium text-slate-200 transition flex items-center gap-2"
+          >
+            <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
+            {syncing ? t('overview.refreshingQuota') : t('overview.refreshQuota')}
+          </button>
           <button
             type="button"
             onClick={onLinkAccount}
@@ -58,7 +117,10 @@ export const OverviewPage: React.FC<Props> = ({
         <div className="bg-slate-800/80 border border-slate-750 p-5 rounded-xl">
           <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
             <span>{t('overview.poolCcuBalance')}</span>
-            <Zap className="w-4 h-4 text-amber-400" />
+            <div className="flex items-center gap-1.5">
+              {renderMetricSyncButton()}
+              <Zap className="w-4 h-4 text-amber-400" />
+            </div>
           </div>
           <div className="text-2xl font-bold text-white">{totalCcu.toFixed(2)} CCU</div>
           <p className="text-xs text-slate-400 mt-1">
@@ -69,7 +131,10 @@ export const OverviewPage: React.FC<Props> = ({
         <div className="bg-slate-800/80 border border-slate-750 p-5 rounded-xl">
           <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
             <span>{t('overview.hourlyBurnRate')}</span>
-            <Zap className="w-4 h-4 text-red-400" />
+            <div className="flex items-center gap-1.5">
+              {renderMetricSyncButton()}
+              <Zap className="w-4 h-4 text-red-400" />
+            </div>
           </div>
           <div className="text-2xl font-bold text-white">{totalBurnRate.toFixed(2)} CCU/h</div>
           <p className="text-xs text-slate-400 mt-1">{t('overview.estimatedConsumption')}</p>

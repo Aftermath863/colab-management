@@ -111,6 +111,12 @@ export const zh: TranslationDictionary = {
   overview: {
     title: '算力池总览',
     subtitle: '实时监控计算集群状态、CCU 算力余额及活跃实例。',
+    refreshQuota: '刷新配额',
+    refreshingQuota: '同步中...',
+    autoRefreshHint: '每 {seconds} 秒自动同步',
+    lastSyncedAt: '上次同步：{time}',
+    neverSynced: '尚未同步',
+    syncQuotaFailed: '刷新配额失败：{error}',
     linkAccount: '绑定账号',
     launchRuntime: '创建实例',
     poolCcuBalance: '算力池 CCU 余额',
@@ -138,6 +144,9 @@ export const zh: TranslationDictionary = {
   accounts: {
     title: 'Google 账号池',
     subtitle: '集中管理多 Google 账号、监控 CCU 算力余额并配置调度优先级。',
+    syncAll: '全部同步',
+    syncingAll: '同步中...',
+    autoSyncBadge: '每 {seconds} 秒自动同步',
     linkGoogleAccount: '绑定 Google 账号',
     ccuBalance: 'CCU 余额',
     burnRate: '消耗速率',
