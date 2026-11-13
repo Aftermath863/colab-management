@@ -364,7 +364,8 @@ async def mount_gdrive_fuse_via_ssh(
         ")\n"
         "print(json.dumps({'mounted': bool(verified), 'already_mounted': False}))\n"
     )
-    cmd = f"python3 -c {json.dumps(remote_script)}"
+    script_b64 = base64.b64encode(remote_script.encode("utf-8")).decode("ascii")
+    cmd = f"python3 -c 'import base64; exec(base64.b64decode(\"{script_b64}\").decode(\"utf-8\"))'"
 
     try:
         proc = await gateway.run_command(cmd, timeout=95.0)
