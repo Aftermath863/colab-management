@@ -13,8 +13,20 @@ export const OAuthModal: React.FC<Props> = ({ authUrl, onComplete, onClose }) =>
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(authUrl);
+  const handleCopy = async () => {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(authUrl);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = authUrl;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

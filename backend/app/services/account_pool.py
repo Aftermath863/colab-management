@@ -6,12 +6,16 @@ token refresh, CCU quota polling, orphan instance discovery, and account auto-se
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import logging
+import secrets
+import threading
 import time
 import urllib.parse
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 from backend.app.config import settings
@@ -22,33 +26,94 @@ from backend.app.services.colab_client import ColabClient
 
 logger = logging.getLogger(__name__)
 
+_PKCE_LOCK = threading.Lock()
+_PKCE_TTL_SEC = 1800
+# state -> (code_verifier, created_at)
+_PENDING_PKCE_FLOWS: Dict[str, Tuple[str, float]] = {}
+
+
+def _prune_expired_pkce_locked(now: float) -> None:
+    expired = [
+        st for st, (_, ts) in _PENDING_PKCE_FLOWS.items()
+        if (now - ts) > _PKCE_TTL_SEC
+    ]
+    for st in expired:
+        _PENDING_PKCE_FLOWS.pop(st, None)
+
+
+def start_oauth_flow() -> Tuple[str, str]:
+    """Generate remote Google OAuth consent URL with RFC 7636 PKCE (S256) and state."""
+    code_verifier = secrets.token_urlsafe(64)
+    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
+    code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    state = secrets.token_urlsafe(22)
+
+    now = time.time()
+    with _PKCE_LOCK:
+        _prune_expired_pkce_locked(now)
+        _PENDING_PKCE_FLOWS[state] = (code_verifier, now)
+
+    params = {
+        "response_type": "code",
+        "client_id": settings.OAUTH_CLIENT_ID,
+        "redirect_uri": settings.OAUTH_REDIRECT_URI,
+        "scope": " ".join(settings.OAUTH_SCOPES),
+        "state": state,
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
+        "prompt": "consent",
+        "token_usage": "remote",
+        "access_type": "offline",
+    }
+    return f"{settings.OAUTH_AUTH_URL}?{urllib.parse.urlencode(params)}", state
+
 
 def get_oauth_url() -> str:
     """Generate remote Google OAuth consent URL for headless authorization."""
-    params = {
-        "client_id": settings.OAUTH_CLIENT_ID,
-        "redirect_uri": settings.OAUTH_REDIRECT_URI,
-        "response_type": "code",
-        "scope": " ".join(settings.OAUTH_SCOPES),
-        "access_type": "offline",
-        "prompt": "consent",
-        "token_usage": "remote",
-    }
-    return f"{settings.OAUTH_AUTH_URL}?{urllib.parse.urlencode(params)}"
+    auth_url, _ = start_oauth_flow()
+    return auth_url
 
 
-def exchange_code(code: str) -> Dict[str, Any]:
+def exchange_code(code: str, state: Optional[str] = None) -> Dict[str, Any]:
     """Exchange authorization code for tokens, fetch user info, and persist account in DB."""
+    raw_code = code.strip()
+    if raw_code.startswith(("http://", "https://")) or ("code=" in raw_code and "&" in raw_code):
+        query_str = urllib.parse.urlparse(raw_code).query if "://" in raw_code else raw_code.lstrip("?")
+        parsed_qs = urllib.parse.parse_qs(query_str)
+        if parsed_qs.get("code"):
+            raw_code = parsed_qs["code"][0].strip()
+        if not state and parsed_qs.get("state"):
+            state = parsed_qs["state"][0].strip()
+
+    matched_state: Optional[str] = None
+    code_verifier: Optional[str] = None
+    now = time.time()
+    with _PKCE_LOCK:
+        _prune_expired_pkce_locked(now)
+        if state and state in _PENDING_PKCE_FLOWS:
+            matched_state = state
+            code_verifier = _PENDING_PKCE_FLOWS[state][0]
+        elif not state and _PENDING_PKCE_FLOWS:
+            matched_state = max(_PENDING_PKCE_FLOWS.items(), key=lambda kv: kv[1][1])[0]
+            code_verifier = _PENDING_PKCE_FLOWS[matched_state][0]
+
     data = {
-        "code": code.strip(),
+        "code": raw_code,
         "client_id": settings.OAUTH_CLIENT_ID,
         "client_secret": settings.OAUTH_CLIENT_SECRET,
         "redirect_uri": settings.OAUTH_REDIRECT_URI,
         "grant_type": "authorization_code",
     }
+    if code_verifier:
+        data["code_verifier"] = code_verifier
+
     resp = requests.post(settings.OAUTH_TOKEN_URL, data=data, timeout=15)
     if not resp.ok:
         raise ValueError(f"Failed to exchange authorization code: HTTP {resp.status_code} {resp.text}")
+
+    if matched_state:
+        with _PKCE_LOCK:
+            _PENDING_PKCE_FLOWS.pop(matched_state, None)
 
     token_data = resp.json()
     access_token = token_data.get("access_token")

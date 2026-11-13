@@ -41,8 +41,20 @@ export const SSHHelperModal: React.FC<SSHHelperModalProps> = ({
     }
   };
 
-  const copyToClipboard = (text: string, isCmd: boolean) => {
-    navigator.clipboard.writeText(text);
+  const copyToClipboard = async (text: string, isCmd: boolean) => {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
     if (isCmd) {
       setCopiedCmd(true);
       setTimeout(() => setCopiedCmd(false), 2000);

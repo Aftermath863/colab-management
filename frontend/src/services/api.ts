@@ -72,21 +72,26 @@ export const api = {
     return res.json();
   },
 
-  async startOAuth(): Promise<string> {
+  async startOAuthFlow(): Promise<{ auth_url: string; state?: string }> {
     const res = checkResponse(await fetch(`${API_BASE}/accounts/oauth/start`, {
       method: 'POST',
       headers: getHeaders(),
     }));
     if (!res.ok) throw new Error('Failed to start OAuth');
     const data = await res.json();
+    return { auth_url: data.auth_url, state: data.state };
+  },
+
+  async startOAuth(): Promise<string> {
+    const data = await this.startOAuthFlow();
     return data.auth_url;
   },
 
-  async completeOAuth(code: string): Promise<Account> {
+  async completeOAuth(code: string, state?: string): Promise<Account> {
     const res = checkResponse(await fetch(`${API_BASE}/accounts/oauth/complete`, {
       method: 'POST',
       headers: getHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ code }),
+      body: JSON.stringify({ code, state }),
     }));
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));

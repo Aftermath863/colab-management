@@ -21,7 +21,7 @@ export const App: React.FC = () => {
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [oauthModalUrl, setOauthModalUrl] = useState<string | null>(null);
+  const [oauthFlow, setOauthFlow] = useState<{ authUrl: string; state?: string } | null>(null);
   const [showNewSessionModal, setShowNewSessionModal] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
 
@@ -71,15 +71,15 @@ export const App: React.FC = () => {
 
   const handleStartOAuth = async () => {
     try {
-      const url = await api.startOAuth();
-      setOauthModalUrl(url);
+      const flow = await api.startOAuthFlow();
+      setOauthFlow({ authUrl: flow.auth_url, state: flow.state });
     } catch (err: any) {
       alert(`Could not start Google OAuth flow: ${err.message}`);
     }
   };
 
   const handleCompleteOAuth = async (code: string) => {
-    await api.completeOAuth(code);
+    await api.completeOAuth(code, oauthFlow?.state);
     await refreshData();
   };
 
@@ -161,11 +161,11 @@ export const App: React.FC = () => {
         {activePage === 'notifications' && <NotificationsPage />}
       </main>
 
-      {oauthModalUrl && (
+      {oauthFlow && (
         <OAuthModal
-          authUrl={oauthModalUrl}
+          authUrl={oauthFlow.authUrl}
           onComplete={handleCompleteOAuth}
-          onClose={() => setOauthModalUrl(null)}
+          onClose={() => setOauthFlow(null)}
         />
       )}
 

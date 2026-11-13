@@ -25,15 +25,15 @@ async def get_accounts(admin=Depends(get_current_admin)):
 @router.post("/oauth/start", response_model=OAuthStartResponse)
 async def start_oauth(admin=Depends(get_current_admin)):
     """Generate remote Google OAuth authorization URL."""
-    auth_url = account_pool.get_oauth_url()
-    return OAuthStartResponse(auth_url=auth_url)
+    auth_url, state = account_pool.start_oauth_flow()
+    return OAuthStartResponse(auth_url=auth_url, state=state)
 
 
 @router.post("/oauth/complete", response_model=AccountSummary)
 async def complete_oauth(req: OAuthCompleteRequest, admin=Depends(get_current_admin)):
     """Exchange authorization code and register Google account."""
     try:
-        account = account_pool.exchange_code(req.code)
+        account = account_pool.exchange_code(req.code, state=req.state)
         return account
     except ValueError as e:
         raise HTTPException(

@@ -376,10 +376,12 @@ class UserStatusResponse(BaseModel):
 
 class OAuthStartResponse(BaseModel):
     auth_url: str
+    state: Optional[str] = None
 
 
 class OAuthCompleteRequest(BaseModel):
     code: str
+    state: Optional[str] = None
 
 
 class ColabUrlResponse(BaseModel):

@@ -1,10 +1,13 @@
 """Integration tests for Account Pool, remote OAuth, token refresh, CCU sync, and selector."""
 
+import base64
+import hashlib
 import json
 import os
 import tempfile
 import time
 import unittest
+import urllib.parse
 
 from backend.app.config import settings
 from backend.app.core.database import get_db, init_db
@@ -53,6 +56,50 @@ class TestAccountPool(unittest.TestCase):
         self.assertIn("client_id=", url)
         self.assertIn("response_type=code", url)
         self.assertIn("token_usage=remote", url)
+        self.assertIn("code_challenge=", url)
+        self.assertIn("code_challenge_method=S256", url)
+        self.assertIn("state=", url)
+
+    def test_pkce_flow_and_redirect_url_code_extraction(self):
+        auth_url, state = account_pool.start_oauth_flow()
+        qs = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(auth_url).query))
+        self.assertEqual(qs.get("state"), state)
+        self.assertEqual(qs.get("code_challenge_method"), "S256")
+        expected_challenge = qs.get("code_challenge")
+        self.assertTrue(expected_challenge)
+
+        code = "4/0A_pkce_test_code"
+        email = "pkce.user@gmail.com"
+        mock_acc = MockOAuthAccount(
+            email=email,
+            name="PKCE User",
+            sub="sub_pkce_123",
+            code=code,
+            access_token="ya29.mock_token_pkce",
+            refresh_token="1//mock_refresh_pkce",
+        )
+        self.hub.oauth.state.register_account(mock_acc)
+
+        pasted_redirect = (
+            f"https://sdk.cloud.google.com/applicationdefaultauthcode.html"
+            f"?state={state}&code={code}"
+        )
+        account = account_pool.exchange_code(pasted_redirect)
+        self.assertEqual(account["email"], email)
+
+        token_reqs = [
+            r for r in self.hub.oauth.state.request_history
+            if r.get("path") == "/token" and r.get("params", {}).get("code") == code
+        ]
+        self.assertTrue(token_reqs, "Expected /token request recorded in mock OAuth history")
+        sent_verifier = token_reqs[-1].get("params", {}).get("code_verifier")
+        self.assertTrue(sent_verifier, "code_verifier must be forwarded on token exchange")
+        computed_challenge = (
+            base64.urlsafe_b64encode(hashlib.sha256(sent_verifier.encode("ascii")).digest())
+            .rstrip(b"=")
+            .decode("ascii")
+        )
+        self.assertEqual(computed_challenge, expected_challenge)
 
     def test_exchange_code_and_account_registration(self):
         # Register an account in mock OAuth server
