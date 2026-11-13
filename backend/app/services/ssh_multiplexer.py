@@ -224,6 +224,10 @@ class SSHGatewayServer(asyncssh.SSHServer):
 
     def __init__(self, gateway: "ColabSSHGateway"):
         self.gateway = gateway
+        self._conn: Optional[asyncssh.SSHServerConnection] = None
+
+    def connection_made(self, conn: asyncssh.SSHServerConnection) -> None:
+        self._conn = conn
 
     def begin_auth(self, username: str) -> bool:
         # Permissive local authentication for seamless developer login
@@ -236,7 +240,18 @@ class SSHGatewayServer(asyncssh.SSHServer):
         self, dest_host: str, dest_port: int, orig_host: str, orig_port: int
     ) -> Any:
         # Tunnel direct TCP/IP port forwards across the upstream SSH client connection
-        return self.gateway.upstream_conn
+        if self.gateway.upstream_conn and not self.gateway.upstream_conn.is_closed():
+            return self.gateway.upstream_conn
+
+        server_conn = self._conn
+        if server_conn is None:
+            return False
+
+        async def _lazy_forward() -> Any:
+            upstream = await self.gateway.get_or_connect_upstream()
+            return await server_conn.forward_tunneled_connection(upstream, dest_host, dest_port)
+
+        return _lazy_forward()
 
 
 class ColabSSHGateway:
@@ -258,9 +273,61 @@ class ColabSSHGateway:
         self.upstream_conn: Optional[asyncssh.SSHClientConnection] = None
         self.upstream_ws: Optional[Any] = None
         self._upstream_lock = asyncio.Lock()
+        self._connect_task: Optional[asyncio.Task] = None
         self._bridge_tasks: List[asyncio.Task] = []
         self._sockets: List[socket.socket] = []
         self.last_activity_ts = time.time()
+
+    def _on_connect_task_done(self, task: asyncio.Task) -> None:
+        """Consume background task exceptions when callers time out while shielded."""
+        if not task.cancelled():
+            try:
+                _ = task.exception()
+            except BaseException:
+                pass
+        if self._connect_task is task:
+            self._connect_task = None
+
+    async def _teardown_upstream(self) -> None:
+        """Idempotently tear down any upstream SSH connection, sockets, bridge tasks, and WebSocket."""
+        conn, self.upstream_conn = self.upstream_conn, None
+        if conn is not None:
+            try:
+                conn.close()
+                await asyncio.wait_for(conn.wait_closed(), timeout=2.0)
+            except BaseException:
+                pass
+
+        tasks = list(self._bridge_tasks)
+        self._bridge_tasks.clear()
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+        if tasks:
+            try:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            except BaseException:
+                pass
+
+        sockets = list(self._sockets)
+        self._sockets.clear()
+        for s in sockets:
+            try:
+                s.close()
+            except OSError:
+                pass
+
+        ws, self.upstream_ws = self.upstream_ws, None
+        if ws is not None:
+            try:
+                await asyncio.wait_for(ws.close(), timeout=2.0)
+            except BaseException:
+                transport = getattr(ws, "transport", None)
+                if transport is not None:
+                    try:
+                        transport.abort()
+                    except BaseException:
+                        pass
 
     def record_activity(self) -> None:
         self.last_activity_ts = time.time()
@@ -282,7 +349,7 @@ class ColabSSHGateway:
         logger.info(f"SSH Gateway for session {self.session_id} listening on 0.0.0.0:{self.port}")
 
     async def get_or_connect_upstream(self) -> asyncssh.SSHClientConnection:
-        """Return existing upstream connection or establish it lazily."""
+        """Return existing upstream connection or establish it via a shared shielded task."""
         if self.upstream_conn and not self.upstream_conn.is_closed():
             return self.upstream_conn
 
@@ -290,8 +357,15 @@ class ColabSSHGateway:
             if self.upstream_conn and not self.upstream_conn.is_closed():
                 return self.upstream_conn
 
-            await self._connect_upstream()
+            if self._connect_task is None or self._connect_task.done():
+                self._connect_task = asyncio.create_task(self._connect_upstream())
+                self._connect_task.add_done_callback(self._on_connect_task_done)
+            task = self._connect_task
+
+        await asyncio.shield(task)
+        if self.upstream_conn and not self.upstream_conn.is_closed():
             return self.upstream_conn
+        raise UpstreamSSHError(f"Upstream SSH connection unavailable for session {self.session_id}")
 
     async def run_command(
         self,
@@ -299,10 +373,12 @@ class ColabSSHGateway:
         timeout: Optional[float] = 300.0,
         check: bool = False,
         encoding: Optional[str] = "utf-8",
+        record_activity: bool = True,
     ) -> asyncssh.SSHCompletedProcess:
         """Execute a command over the persistent upstream SSH connection."""
         conn = await self.get_or_connect_upstream()
-        self.record_activity()
+        if record_activity:
+            self.record_activity()
         if timeout:
             return await asyncio.wait_for(
                 conn.run(command, check=check, encoding=encoding),
@@ -312,6 +388,9 @@ class ColabSSHGateway:
 
     async def _connect_upstream(self) -> None:
         """Establish single WebSocket to Colab and connect AsyncSSH client."""
+        # Always tear down any stale local upstream resources before opening a new slot
+        await self._teardown_upstream()
+
         # 1. Fetch credentials from DB
         with get_db() as conn:
             row = conn.execute(
@@ -337,7 +416,7 @@ class ColabSSHGateway:
 
         logger.info(f"Connecting upstream SSH WebSocket for session {self.session_id}...")
 
-        # 3. Connect WebSocket with version-compatible header argument
+        # 3. Connect WebSocket with version-compatible header argument and bounded 429 retry
         headers = {PUBKEY_HEADER: pubkey_str}
         kw = {}
         if "additional_headers" in inspect.signature(websockets.connect).parameters:
@@ -345,51 +424,71 @@ class ColabSSHGateway:
         else:
             kw["extra_headers"] = headers
 
-        try:
-            ws = await websockets.connect(ws_url, open_timeout=15, ping_interval=30, **kw)
-        except Exception as e:
-            status_code = getattr(e, "status_code", None)
-            if status_code == 429 or "429" in str(e):
-                raise UpstreamSSHBusyError("Colab runtime has an active SSH session (HTTP 429).")
-            if status_code in (400, 401, 403):
-                raise UpstreamSSHAuthError(f"Colab rejected SSH WebSocket handshake (HTTP {status_code}): {e}")
-            raise UpstreamSSHError(f"Failed to connect upstream WebSocket: {e}")
+        ws = None
+        for attempt in range(3):
+            try:
+                ws = await websockets.connect(ws_url, open_timeout=20, ping_interval=30, **kw)
+                break
+            except Exception as e:
+                status_code = getattr(e, "status_code", None)
+                if status_code == 429 or "429" in str(e):
+                    if attempt < 2:
+                        await asyncio.sleep(0.4 * (attempt + 1))
+                        continue
+                    raise UpstreamSSHBusyError("Colab runtime has an active SSH session (HTTP 429).")
+                if status_code in (400, 401, 403):
+                    raise UpstreamSSHAuthError(f"Colab rejected SSH WebSocket handshake (HTTP {status_code}): {e}")
+                raise UpstreamSSHError(f"Failed to connect upstream WebSocket: {e}")
 
         self.upstream_ws = ws
 
         # 4. Create Socketpair for In-Memory Byte Stream Bridging
-        sock_ws, sock_ssh = socket.socketpair()
-        sock_ws.setblocking(False)
-        sock_ssh.setblocking(False)
-        self._sockets.extend([sock_ws, sock_ssh])
-
-        loop = asyncio.get_running_loop()
-
-        async def ws_to_sock():
-            try:
-                async for message in ws:
-                    if isinstance(message, str):
-                        message = message.encode("utf-8")
-                    await loop.sock_sendall(sock_ws, message)
-            except (websockets.ConnectionClosed, OSError, asyncio.CancelledError):
-                pass
-
-        async def sock_to_ws():
-            try:
-                while True:
-                    chunk = await loop.sock_recv(sock_ws, 8192)
-                    if not chunk:
-                        break
-                    await ws.send(chunk)
-            except (websockets.ConnectionClosed, OSError, asyncio.CancelledError):
-                pass
-
-        t1 = asyncio.create_task(ws_to_sock())
-        t2 = asyncio.create_task(sock_to_ws())
-        self._bridge_tasks.extend([t1, t2])
-
-        # 5. Connect AsyncSSH Client over sock_ssh
         try:
+            sock_ws, sock_ssh = socket.socketpair()
+            sock_ws.setblocking(False)
+            sock_ssh.setblocking(False)
+            self._sockets.extend([sock_ws, sock_ssh])
+
+            loop = asyncio.get_running_loop()
+
+            async def ws_to_sock():
+                try:
+                    async for message in ws:
+                        if isinstance(message, str):
+                            message = message.encode("utf-8")
+                        await loop.sock_sendall(sock_ws, message)
+                except (websockets.ConnectionClosed, OSError, asyncio.CancelledError):
+                    pass
+                finally:
+                    try:
+                        sock_ws.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
+                    try:
+                        sock_ws.close()
+                    except OSError:
+                        pass
+
+            async def sock_to_ws():
+                try:
+                    while True:
+                        chunk = await loop.sock_recv(sock_ws, 8192)
+                        if not chunk:
+                            break
+                        await ws.send(chunk)
+                except (websockets.ConnectionClosed, OSError, asyncio.CancelledError):
+                    pass
+                finally:
+                    try:
+                        await ws.close()
+                    except BaseException:
+                        pass
+
+            t1 = asyncio.create_task(ws_to_sock())
+            t2 = asyncio.create_task(sock_to_ws())
+            self._bridge_tasks.extend([t1, t2])
+
+            # 5. Connect AsyncSSH Client over sock_ssh
             self.upstream_conn = await asyncssh.connect(
                 host="localhost",
                 sock=sock_ssh,
@@ -397,50 +496,39 @@ class ColabSSHGateway:
                 client_keys=[self.client_key],
                 known_hosts=None,
                 encoding=None,
+                login_timeout=20,
             )
             logger.info(f"Upstream SSH client connected successfully for session {self.session_id}")
-        except Exception as e:
-            try:
-                await ws.close()
-            except Exception:
-                pass
-            raise UpstreamSSHError(f"Failed AsyncSSH handshake over WebSocket bridge: {e}")
+        except BaseException as e:
+            await asyncio.shield(self._teardown_upstream())
+            if isinstance(e, (UpstreamSSHError, asyncio.CancelledError)):
+                raise
+            raise UpstreamSSHError(f"Failed AsyncSSH handshake over WebSocket bridge: {e}") from e
 
     async def close(self) -> None:
-        """Gracefully close listener, client channels, and upstream WebSocket."""
-        if self.server:
+        """Gracefully close listener, in-flight connect task, client channels, and upstream WebSocket."""
+        server, self.server = self.server, None
+        if server:
             try:
-                self.server.close()
-                await self.server.wait_closed()
+                server.close()
             except Exception:
                 pass
-            self.server = None
 
-        if self.upstream_conn:
+        connect_task, self._connect_task = self._connect_task, None
+        if connect_task and not connect_task.done():
+            connect_task.cancel()
             try:
-                self.upstream_conn.close()
-                await self.upstream_conn.wait_closed()
-            except Exception:
+                await asyncio.gather(connect_task, return_exceptions=True)
+            except BaseException:
                 pass
-            self.upstream_conn = None
 
-        for t in self._bridge_tasks:
-            t.cancel()
-        self._bridge_tasks.clear()
+        await self._teardown_upstream()
 
-        for s in self._sockets:
+        if server:
             try:
-                s.close()
-            except Exception:
+                await asyncio.wait_for(server.wait_closed(), timeout=1.0)
+            except BaseException:
                 pass
-        self._sockets.clear()
-
-        if self.upstream_ws:
-            try:
-                await self.upstream_ws.close()
-            except Exception:
-                pass
-            self.upstream_ws = None
 
 
 class SSHMultiplexerService:
@@ -452,12 +540,30 @@ class SSHMultiplexerService:
         self._host_key: Optional[asyncssh.SSHKey] = None
         self._client_key: Optional[asyncssh.SSHKey] = None
 
+    def _load_or_create_key(self, key_path: str) -> asyncssh.SSHKey:
+        """Persist Ed25519 key alongside DATABASE_PATH so container restarts keep host identity."""
+        try:
+            if os.path.exists(key_path):
+                return asyncssh.read_private_key(key_path)
+            key = asyncssh.generate_private_key("ssh-ed25519")
+            parent_dir = os.path.dirname(key_path)
+            if parent_dir:
+                os.makedirs(parent_dir, exist_ok=True)
+            with open(key_path, "wb") as f:
+                f.write(key.export_private_key())
+            os.chmod(key_path, 0o600)
+            return key
+        except Exception as e:
+            logger.warning(f"Falling back to ephemeral Ed25519 key ({key_path}): {e}")
+            return asyncssh.generate_private_key("ssh-ed25519")
+
     def _ensure_keys(self) -> None:
         """Generate or load persistent host and upstream Ed25519 keys."""
+        key_dir = os.path.dirname(os.path.abspath(settings.DATABASE_PATH))
         if not self._host_key:
-            self._host_key = asyncssh.generate_private_key("ssh-ed25519")
+            self._host_key = self._load_or_create_key(os.path.join(key_dir, "ssh_host_ed25519"))
         if not self._client_key:
-            self._client_key = asyncssh.generate_private_key("ssh-ed25519")
+            self._client_key = self._load_or_create_key(os.path.join(key_dir, "ssh_client_ed25519"))
 
     async def init_from_db(self) -> None:
         """Startup reconciliation: restart listeners for active DB sessions."""
@@ -501,6 +607,20 @@ class SSHMultiplexerService:
                 except Exception:
                     pass
                 gateway.server = None
+            if gateway._connect_task and not gateway._connect_task.done():
+                try:
+                    gateway._connect_task.cancel()
+                except Exception:
+                    pass
+                gateway._connect_task = None
+            if gateway.upstream_ws is not None:
+                transport = getattr(gateway.upstream_ws, "transport", None)
+                if transport is not None:
+                    try:
+                        transport.abort()
+                    except Exception:
+                        pass
+                gateway.upstream_ws = None
             for s in gateway._sockets:
                 try:
                     s.close()

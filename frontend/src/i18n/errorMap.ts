@@ -26,6 +26,7 @@ const EXACT_ZH_ERRORS: Record<string, string> = {
   'Failed to get Colab deep link': '获取 Colab 直达链接失败',
   'Failed to fetch SSH config': '获取 SSH 配置失败',
   'Session runtime proxy information unavailable': '实例运行时代理信息暂不可用',
+  'Colab runtime has an active SSH session (HTTP 429).': 'Colab 实例已有活跃的 SSH 会话连接（HTTP 429）',
 
   // Files & Workspace Sync
   'Failed to list contents': '获取目录列表失败',
@@ -167,6 +168,8 @@ const PATTERN_ZH_ERRORS: Array<[RegExp, (matches: RegExpMatchArray, depth: numbe
     (m) => `任务 ${m[1]} 的输出 Notebook 尚未生成（当前状态：${translateStatusToken(m[2])}）`,
   ],
   [/^Cannot generate Colab URL for session\s+(\S+)$/i, (m) => `无法为实例 ${m[1]} 生成 Colab 链接`],
+  [/^Failed to connect upstream WebSocket:\s*(.+)$/i, (m, d) => `连接上游 WebSocket 失败：${translateNestedZh(m[1], d)}`],
+  [/^Failed AsyncSSH handshake over WebSocket bridge:\s*(.+)$/i, (m, d) => `WebSocket 隧道 SSH 握手失败：${translateNestedZh(m[1], d)}`],
   [/^Failed to create template:\s*(.+)$/i, (m, d) => `创建环境模板失败：${translateNestedZh(m[1], d)}`],
   [/^Failed to update template:\s*(.+)$/i, (m, d) => `更新环境模板失败：${translateNestedZh(m[1], d)}`],
   [/^Failed to store secret:\s*(.+)$/i, (m, d) => `保存密钥失败：${translateNestedZh(m[1], d)}`],

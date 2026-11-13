@@ -521,3 +521,256 @@ class TestSSHMultiplexerStress(unittest.IsolatedAsyncioTestCase):
             await gw._connect_upstream()
 
         await gw.close()
+
+    async def test_caller_timeout_during_handshake_shields_connect_and_prevents_429(self):
+        """Timeout of an impatient caller (e.g. telemetry probe) must not cancel the shared
+        upstream SSH handshake or leak an orphan WebSocket that causes HTTP 429 for SSH clients.
+        """
+        backend_key = asyncssh.generate_private_key("ssh-ed25519")
+        client_key = asyncssh.generate_private_key("ssh-ed25519")
+        gw_key = asyncssh.generate_private_key("ssh-ed25519")
+
+        backend = await asyncssh.create_server(
+            MockColabSSHServer,
+            "127.0.0.1",
+            0,
+            server_host_keys=[backend_key],
+            encoding=None,
+        )
+        backend_port = backend.sockets[0].getsockname()[1]
+        self.servers_to_close.append(backend)
+
+        ws_lock_acquired = False
+        ws_connection_count = 0
+        http_429_count = 0
+
+        def enforce_single_slot(connection, request):
+            nonlocal http_429_count
+            if ws_lock_acquired:
+                http_429_count += 1
+                return connection.respond(http.HTTPStatus.TOO_MANY_REQUESTS, "HTTP 429 Busy\n")
+            return None
+
+        async def delayed_ws_handler(ws):
+            nonlocal ws_lock_acquired, ws_connection_count
+            ws_lock_acquired = True
+            ws_connection_count += 1
+            try:
+                # Simulate cross-ocean handshake latency before SSH bytes flow
+                await asyncio.sleep(0.35)
+                reader, writer = await asyncio.open_connection("127.0.0.1", backend_port)
+
+                async def from_ws():
+                    try:
+                        async for msg in ws:
+                            writer.write(msg if isinstance(msg, bytes) else msg.encode())
+                            await writer.drain()
+                    except Exception:
+                        pass
+                    finally:
+                        writer.close()
+
+                async def to_ws():
+                    try:
+                        while True:
+                            data = await reader.read(4096)
+                            if not data:
+                                break
+                            await ws.send(data)
+                    except Exception:
+                        pass
+
+                await asyncio.gather(from_ws(), to_ws(), return_exceptions=True)
+            finally:
+                ws_lock_acquired = False
+
+        ws_server = await websockets.serve(
+            delayed_ws_handler, "127.0.0.1", 0, process_request=enforce_single_slot
+        )
+        ws_port = ws_server.sockets[0].getsockname()[1]
+        self.servers_to_close.append(ws_server)
+
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO sessions (
+                    id, name, account_id, notebook_hash, endpoint, proxy_url,
+                    proxy_token_enc, token_expires_at, accelerator, status
+                ) VALUES ('sess_shield', 'shield', ?, 'h', 'ep', ?, ?, CURRENT_TIMESTAMP, 'T4', 'READY')
+                """,
+                (self.account_id, f"http://127.0.0.1:{ws_port}", encrypt_secret("token")),
+            )
+
+        gw = ColabSSHGateway("sess_shield", 0, gw_key, client_key)
+        gw_listener = await asyncssh.create_server(
+            lambda: SSHGatewayServer(gw),
+            host="127.0.0.1",
+            port=0,
+            server_host_keys=[gw_key],
+            encoding=None,
+        )
+        gw.server = gw_listener
+        gw_port = gw_listener.sockets[0].getsockname()[1]
+        self.servers_to_close.append(gw_listener)
+
+        # Caller 1 (Telemetry simulation) times out mid-handshake
+        with self.assertRaises(asyncio.TimeoutError):
+            await asyncio.wait_for(
+                gw.run_command("echo telemetry_probe", record_activity=False),
+                timeout=0.08,
+            )
+
+        # Caller 2 (User SSH client) connects immediately afterwards
+        client_conn = await asyncssh.connect("127.0.0.1", gw_port, known_hosts=None, encoding=None)
+        self.connections_to_close.append(client_conn)
+        res = await asyncio.wait_for(client_conn.run("echo hello_after_timeout"), timeout=5.0)
+        self.assertEqual(res.stdout.decode().strip(), "REPLY:echo hello_after_timeout")
+        self.assertEqual(http_429_count, 0)
+        self.assertEqual(ws_connection_count, 1)
+
+        client_conn.close()
+        await client_conn.wait_closed()
+        await gw.close()
+
+    async def test_cancelled_connect_upstream_closes_websocket_without_leaking_429_slot(self):
+        """Direct cancellation (CancelledError) of _connect_upstream must close the open
+        WebSocket cleanly so Colab's single /colab/ssh slot is released immediately.
+        """
+        backend_key = asyncssh.generate_private_key("ssh-ed25519")
+        client_key = asyncssh.generate_private_key("ssh-ed25519")
+        gw_key = asyncssh.generate_private_key("ssh-ed25519")
+
+        backend = await asyncssh.create_server(
+            MockColabSSHServer,
+            "127.0.0.1",
+            0,
+            server_host_keys=[backend_key],
+            encoding=None,
+        )
+        backend_port = backend.sockets[0].getsockname()[1]
+        self.servers_to_close.append(backend)
+
+        ws_lock_acquired = False
+        http_429_count = 0
+        slot_acquired_event = asyncio.Event()
+        stall_handshake = True
+
+        def enforce_single_slot(connection, request):
+            nonlocal http_429_count
+            if ws_lock_acquired:
+                http_429_count += 1
+                return connection.respond(http.HTTPStatus.TOO_MANY_REQUESTS, "HTTP 429 Busy\n")
+            return None
+
+        async def ws_handler(ws):
+            nonlocal ws_lock_acquired
+            ws_lock_acquired = True
+            slot_acquired_event.set()
+            try:
+                if stall_handshake:
+                    await ws.wait_closed()
+                    return
+
+                reader, writer = await asyncio.open_connection("127.0.0.1", backend_port)
+
+                async def from_ws():
+                    try:
+                        async for msg in ws:
+                            writer.write(msg if isinstance(msg, bytes) else msg.encode())
+                            await writer.drain()
+                    except Exception:
+                        pass
+                    finally:
+                        writer.close()
+
+                async def to_ws():
+                    try:
+                        while True:
+                            data = await reader.read(4096)
+                            if not data:
+                                break
+                            await ws.send(data)
+                    except Exception:
+                        pass
+
+                await asyncio.gather(from_ws(), to_ws(), return_exceptions=True)
+            finally:
+                ws_lock_acquired = False
+
+        ws_server = await websockets.serve(
+            ws_handler, "127.0.0.1", 0, process_request=enforce_single_slot
+        )
+        ws_port = ws_server.sockets[0].getsockname()[1]
+        self.servers_to_close.append(ws_server)
+
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO sessions (
+                    id, name, account_id, notebook_hash, endpoint, proxy_url,
+                    proxy_token_enc, token_expires_at, accelerator, status
+                ) VALUES ('sess_cancel', 'cancel', ?, 'h', 'ep', ?, ?, CURRENT_TIMESTAMP, 'T4', 'READY')
+                """,
+                (self.account_id, f"http://127.0.0.1:{ws_port}", encrypt_secret("token")),
+            )
+
+        gw = ColabSSHGateway("sess_cancel", 0, gw_key, client_key)
+        task = asyncio.create_task(gw._connect_upstream())
+        await asyncio.wait_for(slot_acquired_event.wait(), timeout=2.0)
+
+        # Inject CancelledError while asyncssh.connect() is waiting on the stalled bridge
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+
+        # Give server ws.wait_closed() a moment to process the clean WebSocket close frame
+        for _ in range(20):
+            if not ws_lock_acquired:
+                break
+            await asyncio.sleep(0.02)
+
+        self.assertFalse(ws_lock_acquired, "Cancelled _connect_upstream leaked open WebSocket slot")
+        self.assertIsNone(gw.upstream_ws)
+        self.assertIsNone(gw.upstream_conn)
+
+        # Unblock handshake and verify subsequent connection succeeds with 0 HTTP 429s
+        stall_handshake = False
+        await gw._connect_upstream()
+        res = await gw.run_command("echo recovered")
+        self.assertEqual(res.stdout.strip(), "REPLY:echo recovered")
+        self.assertEqual(http_429_count, 0)
+
+        await gw.close()
+
+    async def test_run_command_record_activity_false_preserves_idle_timestamp(self):
+        """Background telemetry commands with record_activity=False must not reset idle timer."""
+        backend_key = asyncssh.generate_private_key("ssh-ed25519")
+        client_key = asyncssh.generate_private_key("ssh-ed25519")
+        gw_key = asyncssh.generate_private_key("ssh-ed25519")
+
+        backend = await asyncssh.create_server(
+            MockColabSSHServer,
+            "127.0.0.1",
+            0,
+            server_host_keys=[backend_key],
+            encoding=None,
+        )
+        backend_port = backend.sockets[0].getsockname()[1]
+        self.servers_to_close.append(backend)
+
+        gw = ColabSSHGateway("sess_activity", 0, gw_key, client_key)
+        gw.upstream_conn = await asyncssh.connect(
+            host="localhost", port=backend_port, client_keys=[client_key], known_hosts=None, encoding=None
+        )
+        gw.last_activity_ts = 1000.0
+
+        probe_res = await gw.run_command("echo telemetry", record_activity=False)
+        self.assertEqual(probe_res.stdout.strip(), "REPLY:echo telemetry")
+        self.assertEqual(gw.last_activity_ts, 1000.0)
+
+        user_res = await gw.run_command("echo user", record_activity=True)
+        self.assertEqual(user_res.stdout.strip(), "REPLY:echo user")
+        self.assertGreater(gw.last_activity_ts, 1000.0)
+
+        await gw.close()

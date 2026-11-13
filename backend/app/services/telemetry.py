@@ -168,7 +168,7 @@ class TelemetryService:
         try:
             raw_metrics = await asyncio.wait_for(
                 self._probe_via_ssh(session_id),
-                timeout=3.0,
+                timeout=8.0,
             )
         except (asyncio.TimeoutError, Exception):
             raw_metrics = None
@@ -305,7 +305,7 @@ class TelemetryService:
             "print(json.dumps(res))\n"
             "\""
         )
-        proc = await gateway.run_command(cmd, timeout=2.5)
+        proc = await gateway.run_command(cmd, timeout=7.0, record_activity=False)
         if proc.exit_status == 0 and proc.stdout:
             return json.loads(proc.stdout.strip())
         return None
