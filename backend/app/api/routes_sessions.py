@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import os
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 
 from backend.app.core.models import (
     ColabUrlResponse,
@@ -95,10 +96,26 @@ async def get_colab_url(session_id: str, admin=Depends(get_current_admin)):
 
 
 @router.get("/{session_id}/ssh-config", response_model=SSHConfigResponse)
-async def get_session_ssh_config(session_id: str, admin=Depends(get_current_admin)):
+async def get_session_ssh_config(
+    session_id: str,
+    request: Request,
+    admin=Depends(get_current_admin),
+):
     """Get SSH connection parameters and VS Code Remote-SSH configuration snippet."""
     try:
-        cfg = session_manager.get_session_ssh_config(session_id)
+        req_host = request.url.hostname
+        host_override = (
+            req_host
+            if (
+                not os.getenv("SSH_PUBLIC_HOST", "").strip()
+                and req_host
+                and req_host not in ("localhost", "127.0.0.1", "testserver")
+            )
+            else None
+        )
+        cfg = session_manager.get_session_ssh_config(
+            session_id, host_override=host_override
+        )
         return SSHConfigResponse(**cfg)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))

@@ -7,6 +7,7 @@ database persistence, and Colab direct web notebook deep-link generation.
 from __future__ import annotations
 
 import logging
+import os
 import socket
 import time
 import uuid
@@ -317,18 +318,27 @@ def get_session_colab_url(session_id: str) -> str:
     return url
 
 
-def get_session_ssh_config(session_id: str) -> Dict[str, Any]:
+def get_session_ssh_config(
+    session_id: str,
+    host_override: Optional[str] = None,
+) -> Dict[str, Any]:
     """Retrieve SSH connection parameters and VS Code Remote-SSH configuration snippet."""
     sess = get_session(session_id)
     if not sess:
         raise ValueError(f"Session {session_id} not found")
 
+    ssh_host = (
+        host_override
+        or os.getenv("SSH_PUBLIC_HOST", "").strip()
+        or getattr(settings, "SSH_PUBLIC_HOST", "localhost")
+        or "localhost"
+    )
     port = sess.get("ssh_local_port")
     name = sess.get("name") or session_id
-    cmd = f"ssh -p {port} root@localhost" if port else "SSH port pool exhausted"
+    cmd = f"ssh -p {port} root@{ssh_host}" if port else "SSH port pool exhausted"
     vscode_cfg = (
         f"Host colab-{name}\n"
-        f"    HostName localhost\n"
+        f"    HostName {ssh_host}\n"
         f"    Port {port}\n"
         f"    User root\n"
         f"    StrictHostKeyChecking no\n"
@@ -337,7 +347,7 @@ def get_session_ssh_config(session_id: str) -> Dict[str, Any]:
 
     return {
         "session_id": session_id,
-        "host": "localhost",
+        "host": ssh_host,
         "port": port,
         "username": "root",
         "connection_command": cmd,

@@ -32,19 +32,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PORT=1113 \
-    PYTHONPATH=/app/backend
+    PYTHONPATH=/app
 
 # Create directory hierarchy and mount targets
 RUN mkdir -p /data /workspace /app/backend /app/frontend/dist
 
-WORKDIR /app/backend
+WORKDIR /app
 
 # Install Python dependencies first for optimal Docker layer caching
-COPY backend/requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+COPY backend/requirements.txt ./backend/requirements.txt
+RUN pip install --no-cache-dir -r backend/requirements.txt
 
 # Copy backend source tree
-COPY backend/ ./
+COPY backend/ ./backend/
 
 # Copy compiled frontend assets from Stage 1
 COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
@@ -61,4 +61,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://127.0.0.1:1113/healthz || exit 1
 
 # Start Uvicorn ASGI daemon on port 1113
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "1113"]
+CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "1113"]

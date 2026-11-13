@@ -48,6 +48,7 @@ class Settings(_BaseConfig):
     # SSH Multiplexer Port Pool
     SSH_PORT_START: int = int(os.getenv("SSH_PORT_START", "2220"))
     SSH_PORT_END: int = int(os.getenv("SSH_PORT_END", "2229"))
+    SSH_PUBLIC_HOST: str = os.getenv("SSH_PUBLIC_HOST", "localhost")
 
     # Lifecycle & Quota Defaults
     DEFAULT_WARNING_CCU: float = float(os.getenv("DEFAULT_WARNING_CCU", "10.0"))

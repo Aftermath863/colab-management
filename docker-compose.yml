@@ -8,6 +8,7 @@ services:
       - "2220-2229:2220-2229" # External SSH Multiplexer Port Pool (VS Code / Cursor)
     environment:
       - PORT=1113
+      - SSH_PUBLIC_HOST=${SSH_PUBLIC_HOST:-localhost}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-changeme}
       - MASTER_KEY=${MASTER_KEY:-}
       - TZ=Asia/Shanghai
