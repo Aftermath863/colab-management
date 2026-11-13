@@ -15,11 +15,30 @@ import {
   NotificationChannelCreatePayload,
 } from '../types';
 
+import {
+  getActiveLocale,
+  safeReadStorage,
+  safeWriteStorage,
+  safeRemoveStorage,
+} from '../i18n';
+
 const API_BASE = '/api';
 
+function getAcceptLanguage(): string {
+  return getActiveLocale() === 'zh' ? 'zh-CN,zh;q=0.9,en;q=0.8' : 'en-US,en;q=0.9';
+}
+
+async function extractErrorDetail(res: Response, fallback: string): Promise<string> {
+  const err = await res.json().catch(() => ({}));
+  return typeof err?.detail === 'string' && err.detail.trim() ? err.detail : fallback;
+}
+
 function getHeaders(extra: Record<string, string> = {}): Record<string, string> {
-  const token = localStorage.getItem('token');
-  const headers: Record<string, string> = { ...extra };
+  const token = safeReadStorage('token');
+  const headers: Record<string, string> = {
+    'Accept-Language': getAcceptLanguage(),
+    ...extra,
+  };
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
@@ -28,8 +47,10 @@ function getHeaders(extra: Record<string, string> = {}): Record<string, string> 
 
 function checkResponse(res: Response): Response {
   if (res.status === 401) {
-    localStorage.removeItem('token');
-    window.dispatchEvent(new Event('auth:unauthorized'));
+    safeRemoveStorage('token');
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(new Event('auth:unauthorized'));
+    }
   }
   return res;
 }
@@ -39,7 +60,10 @@ export const api = {
   async login(password: string): Promise<string> {
     const res = await fetch(`${API_BASE}/auth/login`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept-Language': getAcceptLanguage(),
+      },
       body: JSON.stringify({ password }),
     });
     if (!res.ok) {
@@ -47,7 +71,7 @@ export const api = {
       throw new Error(err.detail || 'Login failed');
     }
     const data = await res.json();
-    localStorage.setItem('token', data.token);
+    safeWriteStorage('token', data.token);
     return data.token;
   },
 
@@ -60,7 +84,7 @@ export const api = {
   },
 
   logout() {
-    localStorage.removeItem('token');
+    safeRemoveStorage('token');
   },
 
   // Accounts
@@ -105,7 +129,7 @@ export const api = {
       method: 'POST',
       headers: getHeaders(),
     }));
-    if (!res.ok) throw new Error('Failed to sync account');
+    if (!res.ok) throw new Error(await extractErrorDetail(res, 'Failed to sync account'));
     return res.json();
   },
 
@@ -114,7 +138,7 @@ export const api = {
       method: 'DELETE',
       headers: getHeaders(),
     }));
-    if (!res.ok) throw new Error('Failed to delete account');
+    if (!res.ok) throw new Error(await extractErrorDetail(res, 'Failed to delete account'));
   },
 
   // Sessions
@@ -154,7 +178,7 @@ export const api = {
       method: 'DELETE',
       headers: getHeaders(),
     }));
-    if (!res.ok) throw new Error('Failed to stop session');
+    if (!res.ok) throw new Error(await extractErrorDetail(res, 'Failed to stop session'));
   },
 
   async getColabUrl(sessionId: string): Promise<string> {
@@ -316,7 +340,7 @@ export const api = {
       method: 'DELETE',
       headers: getHeaders(),
     }));
-    if (!res.ok) throw new Error('Failed to delete template');
+    if (!res.ok) throw new Error(await extractErrorDetail(res, 'Failed to delete template'));
   },
 
   // Secrets Vault
@@ -346,7 +370,7 @@ export const api = {
       method: 'DELETE',
       headers: getHeaders(),
     }));
-    if (!res.ok) throw new Error('Failed to delete secret');
+    if (!res.ok) throw new Error(await extractErrorDetail(res, 'Failed to delete secret'));
   },
 
   // Cloud Storage Profiles & Mounting
@@ -450,7 +474,7 @@ export const api = {
       method: 'POST',
       headers: getHeaders(),
     }));
-    if (!res.ok) throw new Error('Failed to cancel job');
+    if (!res.ok) throw new Error(await extractErrorDetail(res, 'Failed to cancel job'));
     return res.json();
   },
 
@@ -497,7 +521,7 @@ export const api = {
       headers: getHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(payload),
     }));
-    if (!res.ok) throw new Error('Failed to update channel');
+    if (!res.ok) throw new Error(await extractErrorDetail(res, 'Failed to update channel'));
     return res.json();
   },
 
@@ -506,7 +530,7 @@ export const api = {
       method: 'DELETE',
       headers: getHeaders(),
     }));
-    if (!res.ok) throw new Error('Failed to delete channel');
+    if (!res.ok) throw new Error(await extractErrorDetail(res, 'Failed to delete channel'));
   },
 
   async testNotificationChannel(id: string): Promise<{ success: boolean; response: string }> {

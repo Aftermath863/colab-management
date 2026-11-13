@@ -13,12 +13,14 @@ import {
 import { Activity, Cpu, HardDrive, RefreshCw } from 'lucide-react';
 import { TelemetryResponse, TelemetrySample } from '../types';
 import { api } from '../services/api';
+import { useI18n } from '../i18n';
 
 interface TelemetryChartsProps {
   sessionId: string;
 }
 
 export const TelemetryCharts: React.FC<TelemetryChartsProps> = ({ sessionId }) => {
+  const { t, te, formatKernelState } = useI18n();
   const [data, setData] = useState<TelemetrySample[]>([]);
   const [latest, setLatest] = useState<TelemetrySample | null>(null);
   const [loading, setLoading] = useState(true);
@@ -73,7 +75,7 @@ export const TelemetryCharts: React.FC<TelemetryChartsProps> = ({ sessionId }) =
     return (
       <div className="flex flex-col items-center justify-center p-12 text-slate-400">
         <RefreshCw className="w-8 h-8 animate-spin mb-3 text-indigo-400" />
-        <p className="text-sm">Connecting to side-channel telemetry stream...</p>
+        <p className="text-sm">{t('telemetry.connecting')}</p>
       </div>
     );
   }
@@ -81,11 +83,13 @@ export const TelemetryCharts: React.FC<TelemetryChartsProps> = ({ sessionId }) =
   if (error && data.length === 0) {
     return (
       <div className="p-6 bg-rose-950/30 border border-rose-800/40 rounded-xl text-rose-300 text-sm">
-        <p className="font-semibold mb-1">Telemetry Unavailable</p>
-        <p>{error}</p>
+        <p className="font-semibold mb-1">{t('telemetry.unavailable')}</p>
+        <p>{te(error)}</p>
       </div>
     );
   }
+
+  const na = t('common.na');
 
   return (
     <div className="space-y-6">
@@ -95,21 +99,21 @@ export const TelemetryCharts: React.FC<TelemetryChartsProps> = ({ sessionId }) =
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
           <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
             <span className="flex items-center gap-1.5 font-medium">
-              <Activity className="w-4 h-4 text-emerald-400" /> GPU Util
+              <Activity className="w-4 h-4 text-emerald-400" /> {t('telemetry.gpuUtil')}
             </span>
-            <span className="text-emerald-400 font-semibold">{latest?.gpu_name || 'GPU'}</span>
+            <span className="text-emerald-400 font-semibold">{latest?.gpu_name || t('telemetry.gpuDefault')}</span>
           </div>
           <div className="text-2xl font-bold text-white mb-1">
             {latest?.gpu_util_pct !== null && latest?.gpu_util_pct !== undefined
               ? `${Math.round(latest.gpu_util_pct)}%`
-              : 'N/A'}
+              : na}
           </div>
           <div className="text-xs text-slate-400 flex justify-between">
-            <span>VRAM:</span>
+            <span>{t('telemetry.vram')}</span>
             <span className="text-slate-300 font-mono">
               {latest?.vram_used_mb !== null && latest?.vram_used_mb !== undefined
                 ? `${Math.round(latest.vram_used_mb)} / ${Math.round(latest.vram_total_mb || 0)} MB`
-                : 'N/A'}
+                : na}
             </span>
           </div>
         </div>
@@ -118,19 +122,19 @@ export const TelemetryCharts: React.FC<TelemetryChartsProps> = ({ sessionId }) =
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
           <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
             <span className="flex items-center gap-1.5 font-medium">
-              <Cpu className="w-4 h-4 text-sky-400" /> CPU Load
+              <Cpu className="w-4 h-4 text-sky-400" /> {t('telemetry.cpuLoad')}
             </span>
-            <span className="text-sky-400 font-semibold">Remote VM</span>
+            <span className="text-sky-400 font-semibold">{t('telemetry.remoteVm')}</span>
           </div>
           <div className="text-2xl font-bold text-white mb-1">
             {latest?.cpu_pct !== null && latest?.cpu_pct !== undefined ? `${Math.round(latest.cpu_pct)}%` : '0%'}
           </div>
           <div className="text-xs text-slate-400 flex justify-between">
-            <span>RAM:</span>
+            <span>{t('telemetry.ram')}</span>
             <span className="text-slate-300 font-mono">
               {latest?.ram_used_mb !== null && latest?.ram_used_mb !== undefined
                 ? `${Math.round(latest.ram_used_mb)} / ${Math.round(latest.ram_total_mb || 0)} MB`
-                : 'N/A'}
+                : na}
             </span>
           </div>
         </div>
@@ -139,19 +143,19 @@ export const TelemetryCharts: React.FC<TelemetryChartsProps> = ({ sessionId }) =
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
           <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
             <span className="flex items-center gap-1.5 font-medium">
-              <HardDrive className="w-4 h-4 text-amber-400" /> Disk (/content)
+              <HardDrive className="w-4 h-4 text-amber-400" /> {t('telemetry.disk')}
             </span>
-            <span className="text-amber-400 font-semibold">Mounted</span>
+            <span className="text-amber-400 font-semibold">{t('telemetry.mounted')}</span>
           </div>
           <div className="text-2xl font-bold text-white mb-1">
             {latest?.disk_used_gb !== null && latest?.disk_used_gb !== undefined
               ? `${latest.disk_used_gb} GB`
-              : 'N/A'}
+              : na}
           </div>
           <div className="text-xs text-slate-400 flex justify-between">
-            <span>Capacity:</span>
+            <span>{t('telemetry.capacity')}</span>
             <span className="text-slate-300 font-mono">
-              {latest?.disk_total_gb ? `${latest.disk_total_gb} GB` : 'N/A'}
+              {latest?.disk_total_gb ? `${latest.disk_total_gb} GB` : na}
             </span>
           </div>
         </div>
@@ -160,16 +164,18 @@ export const TelemetryCharts: React.FC<TelemetryChartsProps> = ({ sessionId }) =
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
           <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
             <span className="flex items-center gap-1.5 font-medium">
-              <RefreshCw className="w-4 h-4 text-indigo-400" /> Kernel State
+              <RefreshCw className="w-4 h-4 text-indigo-400" /> {t('telemetry.kernelState')}
             </span>
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
           </div>
           <div className="text-2xl font-bold text-white mb-1 capitalize">
-            {latest?.kernel_state || 'Idle'}
+            {formatKernelState(latest?.kernel_state)}
           </div>
           <div className="text-xs text-slate-400 flex justify-between">
-            <span>Last Probe:</span>
-            <span className="text-slate-300 font-mono">{latest?.ts ? latest.ts.split(' ')[1] : 'Just now'}</span>
+            <span>{t('telemetry.lastProbe')}</span>
+            <span className="text-slate-300 font-mono">
+              {latest?.ts ? latest.ts.split(' ')[1] : t('telemetry.justNow')}
+            </span>
           </div>
         </div>
       </div>
@@ -182,16 +188,16 @@ export const TelemetryCharts: React.FC<TelemetryChartsProps> = ({ sessionId }) =
             <div>
               <h3 className="text-sm font-semibold text-white flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                GPU Utilization & VRAM Saturation
+                {t('telemetry.gpuChartTitle')}
               </h3>
-              <p className="text-xs text-slate-400">Live percentage over recent probe intervals</p>
+              <p className="text-xs text-slate-400">{t('telemetry.gpuChartDesc')}</p>
             </div>
             <div className="flex items-center gap-3 text-xs">
               <span className="flex items-center gap-1 text-emerald-400">
-                <span className="w-2 h-2 rounded bg-emerald-500 inline-block"></span> GPU %
+                <span className="w-2 h-2 rounded bg-emerald-500 inline-block"></span> {t('telemetry.gpuPct')}
               </span>
               <span className="flex items-center gap-1 text-indigo-400">
-                <span className="w-2 h-2 rounded bg-indigo-500 inline-block"></span> VRAM %
+                <span className="w-2 h-2 rounded bg-indigo-500 inline-block"></span> {t('telemetry.vramPct')}
               </span>
             </div>
           </div>
@@ -223,7 +229,7 @@ export const TelemetryCharts: React.FC<TelemetryChartsProps> = ({ sessionId }) =
                 <Area
                   type="monotone"
                   dataKey="gpu_util_pct"
-                  name="GPU %"
+                  name={t('telemetry.gpuPct')}
                   stroke="#10b981"
                   strokeWidth={2}
                   fillOpacity={1}
@@ -232,7 +238,7 @@ export const TelemetryCharts: React.FC<TelemetryChartsProps> = ({ sessionId }) =
                 <Area
                   type="monotone"
                   dataKey="vramPct"
-                  name="VRAM %"
+                  name={t('telemetry.vramPct')}
                   stroke="#6366f1"
                   strokeWidth={2}
                   fillOpacity={1}
@@ -249,16 +255,16 @@ export const TelemetryCharts: React.FC<TelemetryChartsProps> = ({ sessionId }) =
             <div>
               <h3 className="text-sm font-semibold text-white flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-sky-500"></span>
-                CPU & System RAM Utilization
+                {t('telemetry.cpuChartTitle')}
               </h3>
-              <p className="text-xs text-slate-400">Host memory and processor resource curves</p>
+              <p className="text-xs text-slate-400">{t('telemetry.cpuChartDesc')}</p>
             </div>
             <div className="flex items-center gap-3 text-xs">
               <span className="flex items-center gap-1 text-sky-400">
-                <span className="w-2 h-2 rounded bg-sky-500 inline-block"></span> CPU %
+                <span className="w-2 h-2 rounded bg-sky-500 inline-block"></span> {t('telemetry.cpuPct')}
               </span>
               <span className="flex items-center gap-1 text-amber-400">
-                <span className="w-2 h-2 rounded bg-amber-500 inline-block"></span> RAM %
+                <span className="w-2 h-2 rounded bg-amber-500 inline-block"></span> {t('telemetry.ramPct')}
               </span>
             </div>
           </div>
@@ -280,7 +286,7 @@ export const TelemetryCharts: React.FC<TelemetryChartsProps> = ({ sessionId }) =
                 <Line
                   type="monotone"
                   dataKey="cpu_pct"
-                  name="CPU %"
+                  name={t('telemetry.cpuPct')}
                   stroke="#0284c7"
                   strokeWidth={2}
                   dot={false}
@@ -288,7 +294,7 @@ export const TelemetryCharts: React.FC<TelemetryChartsProps> = ({ sessionId }) =
                 <Line
                   type="monotone"
                   dataKey="ramPct"
-                  name="RAM %"
+                  name={t('telemetry.ramPct')}
                   stroke="#f59e0b"
                   strokeWidth={2}
                   dot={false}

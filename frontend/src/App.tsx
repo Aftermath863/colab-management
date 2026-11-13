@@ -12,10 +12,12 @@ import { OAuthModal } from './components/OAuthModal';
 import { NewSessionModal } from './components/NewSessionModal';
 import { Account, Session } from './types';
 import { api } from './services/api';
+import { I18nProvider, Locale, safeReadStorage, useI18n } from './i18n';
 
-export const App: React.FC = () => {
+const AppContent: React.FC = () => {
+  const { formatActionError } = useI18n();
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(
-    Boolean(localStorage.getItem('token'))
+    Boolean(safeReadStorage('token'))
   );
   const [activePage, setActivePage] = useState<string>('overview');
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
@@ -47,7 +49,7 @@ export const App: React.FC = () => {
       setSessions(sess);
     } catch (err: any) {
       console.error('Failed to load fleet state:', err);
-      if (err?.message?.toLowerCase().includes('authenticated') || !localStorage.getItem('token')) {
+      if (err?.message?.toLowerCase().includes('authenticated') || !safeReadStorage('token')) {
         handleLogout();
       }
     }
@@ -74,7 +76,7 @@ export const App: React.FC = () => {
       const flow = await api.startOAuthFlow();
       setOauthFlow({ authUrl: flow.auth_url, state: flow.state });
     } catch (err: any) {
-      alert(`Could not start Google OAuth flow: ${err.message}`);
+      alert(formatActionError('oauth.startFailed', err?.message));
     }
   };
 
@@ -179,3 +181,9 @@ export const App: React.FC = () => {
     </div>
   );
 };
+
+export const App: React.FC<{ initialLocale?: Locale }> = ({ initialLocale }) => (
+  <I18nProvider initialLocale={initialLocale}>
+    <AppContent />
+  </I18nProvider>
+);

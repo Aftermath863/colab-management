@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { ContentItem } from '../types';
 import { api } from '../services/api';
+import { LocalizedText, useI18n } from '../i18n';
 
 interface Props {
   sessionId: string;
@@ -22,6 +23,7 @@ interface Props {
 }
 
 export const FileExplorerTab: React.FC<Props> = ({ sessionId, onEditFile }) => {
+  const { t, te, tm, formatActionError } = useI18n();
   const [currentPath, setCurrentPath] = useState('');
   const [items, setItems] = useState<ContentItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -31,7 +33,7 @@ export const FileExplorerTab: React.FC<Props> = ({ sessionId, onEditFile }) => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncToast, setSyncToast] = useState<{
     type: 'success' | 'error' | 'info';
-    text: string;
+    msg: LocalizedText;
   } | null>(null);
 
   const loadDirectory = async (path: string) => {
@@ -71,14 +73,14 @@ export const FileExplorerTab: React.FC<Props> = ({ sessionId, onEditFile }) => {
 
   const handleDelete = async (e: React.MouseEvent, item: ContentItem) => {
     e.stopPropagation();
-    if (!confirm(`Are you sure you want to delete ${item.name}?`)) return;
+    if (!confirm(t('files.confirmDelete', { name: item.name }))) return;
 
     try {
       const itemPath = currentPath ? `${currentPath}/${item.name}` : item.name;
       await api.deletePath(sessionId, itemPath);
       loadDirectory(currentPath);
     } catch (err: any) {
-      alert(`Delete failed: ${err.message}`);
+      alert(formatActionError('files.deleteFailed', err?.message));
     }
   };
 
@@ -98,7 +100,7 @@ export const FileExplorerTab: React.FC<Props> = ({ sessionId, onEditFile }) => {
         await api.uploadFile(sessionId, targetPath, b64, file.name);
         loadDirectory(currentPath);
       } catch (err: any) {
-        alert(`Upload failed: ${err.message}`);
+        alert(formatActionError('files.uploadFailed', err?.message));
       }
     };
     reader.readAsDataURL(file);
@@ -106,7 +108,7 @@ export const FileExplorerTab: React.FC<Props> = ({ sessionId, onEditFile }) => {
 
   const handlePushSync = async () => {
     setIsSyncing(true);
-    setSyncToast({ type: 'info', text: 'Syncing local ./workspace to remote /content...' });
+    setSyncToast({ type: 'info', msg: { key: 'files.pushSyncing' } });
     try {
       const res = await api.pushWorkspaceSync(sessionId);
       const uploaded = res.files_uploaded ?? 0;
@@ -114,11 +116,14 @@ export const FileExplorerTab: React.FC<Props> = ({ sessionId, onEditFile }) => {
       const kb = Math.round(res.total_bytes_transferred / 1024);
       setSyncToast({
         type: 'success',
-        text: `Push complete: ${uploaded} files uploaded (${kb} KB), ${skipped} files skipped (large models / git ignored).`,
+        msg: { key: 'files.pushComplete', params: { uploaded, kb, skipped } },
       });
       loadDirectory(currentPath);
     } catch (err: any) {
-      setSyncToast({ type: 'error', text: err.message || 'Workspace push sync failed' });
+      setSyncToast({
+        type: 'error',
+        msg: err.message ? { raw: err.message } : { key: 'files.pushFailed' },
+      });
     } finally {
       setIsSyncing(false);
     }
@@ -126,7 +131,7 @@ export const FileExplorerTab: React.FC<Props> = ({ sessionId, onEditFile }) => {
 
   const handlePullSync = async () => {
     setIsSyncing(true);
-    setSyncToast({ type: 'info', text: 'Pulling output files from remote /content to ./workspace...' });
+    setSyncToast({ type: 'info', msg: { key: 'files.pullSyncing' } });
     try {
       const res = await api.pullWorkspaceSync(sessionId);
       const downloaded = res.files_downloaded ?? 0;
@@ -134,11 +139,14 @@ export const FileExplorerTab: React.FC<Props> = ({ sessionId, onEditFile }) => {
       const kb = Math.round(res.total_bytes_transferred / 1024);
       setSyncToast({
         type: 'success',
-        text: `Pull complete: ${downloaded} files downloaded (${kb} KB), ${skipped} skipped.`,
+        msg: { key: 'files.pullComplete', params: { downloaded, kb, skipped } },
       });
       loadDirectory(currentPath);
     } catch (err: any) {
-      setSyncToast({ type: 'error', text: err.message || 'Workspace pull sync failed' });
+      setSyncToast({
+        type: 'error',
+        msg: err.message ? { raw: err.message } : { key: 'files.pullFailed' },
+      });
     } finally {
       setIsSyncing(false);
     }
@@ -165,61 +173,70 @@ export const FileExplorerTab: React.FC<Props> = ({ sessionId, onEditFile }) => {
             ) : (
               <RefreshCw className="w-3.5 h-3.5 shrink-0 animate-spin text-indigo-400" />
             )}
-            <span>{syncToast.text}</span>
+            <span>{tm(syncToast.msg)}</span>
           </div>
-          <button onClick={() => setSyncToast(null)} className="p-0.5 hover:bg-white/10 rounded">
+          <button
+            type="button"
+            onClick={() => setSyncToast(null)}
+            className="p-0.5 hover:bg-white/10 rounded"
+            title={t('common.close')}
+          >
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
 
       {/* Toolbar */}
-      <div className="h-10 bg-slate-800 border-b border-slate-700 px-4 flex items-center justify-between text-xs">
-        <div className="flex items-center gap-2 font-mono">
+      <div className="min-h-[2.5rem] py-1.5 bg-slate-800 border-b border-slate-700 px-3 sm:px-4 flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div className="flex items-center gap-2 font-mono min-w-0">
           <button
+            type="button"
             onClick={handleNavigateUp}
             disabled={!currentPath}
-            className="p-1 hover:bg-slate-700 rounded disabled:opacity-30"
-            title="Up directory"
+            className="p-1 hover:bg-slate-700 rounded disabled:opacity-30 shrink-0"
+            title={t('files.upDirectory')}
           >
             <ArrowUp className="w-4 h-4" />
           </button>
-          <span>/content/{currentPath}</span>
+          <span className="truncate">/content/{currentPath}</span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {/* Push Sync Button */}
           <button
+            type="button"
             onClick={handlePushSync}
             disabled={isSyncing}
             className="flex items-center gap-1.5 px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded text-white font-medium transition-colors"
-            title="Push local ./workspace changes to remote /content (skips large models and .git)"
+            title={t('files.pushSyncTooltip')}
           >
             <UploadCloud className="w-3.5 h-3.5" />
-            <span>Push Sync</span>
+            <span>{t('files.pushSync')}</span>
           </button>
 
           {/* Pull Sync Button */}
           <button
+            type="button"
             onClick={handlePullSync}
             disabled={isSyncing}
             className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 rounded text-slate-200 transition-colors"
-            title="Pull remote /content changes to local ./workspace"
+            title={t('files.pullSyncTooltip')}
           >
             <DownloadCloud className="w-3.5 h-3.5" />
-            <span>Pull Sync</span>
+            <span>{t('files.pullSync')}</span>
           </button>
 
           <button
+            type="button"
             onClick={() => loadDirectory(currentPath)}
             disabled={loading}
             className="flex items-center gap-1 px-2.5 py-1 bg-slate-700 hover:bg-slate-600 rounded text-slate-200"
           >
-            <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} /> Refresh
+            <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} /> {t('common.refresh')}
           </button>
 
           <label className="flex items-center gap-1 px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded text-white font-medium cursor-pointer">
-            <Upload className="w-3.5 h-3.5" /> Upload File
+            <Upload className="w-3.5 h-3.5" /> {t('files.uploadFile')}
             <input type="file" onChange={handleFileUpload} className="hidden" />
           </label>
         </div>
@@ -229,14 +246,14 @@ export const FileExplorerTab: React.FC<Props> = ({ sessionId, onEditFile }) => {
       <div className="flex-1 overflow-y-auto p-4">
         {error && (
           <div className="mb-4 text-xs text-red-400 bg-red-950/40 p-2.5 rounded border border-red-800">
-            {error}
+            {te(error)}
           </div>
         )}
 
         {loading ? (
-          <div className="text-center text-slate-500 py-8">Loading directory contents...</div>
+          <div className="text-center text-slate-500 py-8">{t('files.loadingDir')}</div>
         ) : items.length === 0 ? (
-          <div className="text-center text-slate-500 py-8">Empty directory</div>
+          <div className="text-center text-slate-500 py-8">{t('files.emptyDir')}</div>
         ) : (
           <div className="grid grid-cols-1 gap-1">
             {items.map((item) => (
@@ -258,21 +275,23 @@ export const FileExplorerTab: React.FC<Props> = ({ sessionId, onEditFile }) => {
                   {item.size !== undefined && <span>{Math.round(item.size / 1024)} KB</span>}
                   {item.type === 'file' && (
                     <button
+                      type="button"
                       onClick={(e) => {
                         e.stopPropagation();
                         const filePath = currentPath ? `${currentPath}/${item.name}` : item.name;
                         onEditFile(filePath);
                       }}
                       className="p-1 hover:text-white"
-                      title="Edit file"
+                      title={t('files.editFileTooltip')}
                     >
                       <Edit className="w-3.5 h-3.5" />
                     </button>
                   )}
                   <button
+                    type="button"
                     onClick={(e) => handleDelete(e, item)}
                     className="p-1 hover:text-red-400"
-                    title="Delete item"
+                    title={t('files.deleteItemTooltip')}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>

@@ -2,12 +2,24 @@ import React, { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
+import { safeReadStorage, translateErrorMessage, useI18n } from '../i18n';
 
 interface Props {
   sessionId: string;
 }
 
+function formatTerminalOutput(chunk: string, isZh: boolean): string {
+  if (!isZh || !chunk.includes('[Colab Terminal Error:')) return chunk;
+  return chunk.replace(/\[Colab Terminal Error:\s*([^\]]+)\]/g, (_m, detail: string) => {
+    const localized = translateErrorMessage(detail.trim(), 'zh');
+    return `[Colab 终端连接错误：${localized}]`;
+  });
+}
+
 export const TerminalTab: React.FC<Props> = ({ sessionId }) => {
+  const { locale } = useI18n();
+  const localeRef = useRef(locale);
+  localeRef.current = locale;
   const terminalRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -29,7 +41,7 @@ export const TerminalTab: React.FC<Props> = ({ sessionId }) => {
     term.open(terminalRef.current);
     fitAddon.fit();
 
-    const token = localStorage.getItem('token') || '';
+    const token = safeReadStorage('token') || '';
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/api/sessions/${sessionId}/terminal?token=${token}`;
     const ws = new WebSocket(wsUrl);
@@ -39,13 +51,14 @@ export const TerminalTab: React.FC<Props> = ({ sessionId }) => {
     };
 
     ws.onmessage = (event) => {
+      const isZh = localeRef.current === 'zh';
       try {
         const msg = JSON.parse(event.data);
         if (msg.data) {
-          term.write(msg.data);
+          term.write(formatTerminalOutput(String(msg.data), isZh));
         }
       } catch {
-        term.write(event.data);
+        term.write(formatTerminalOutput(String(event.data), isZh));
       }
     };
 

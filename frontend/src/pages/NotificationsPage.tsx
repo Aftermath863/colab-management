@@ -10,34 +10,38 @@ import {
   AlertCircle,
   Shield,
   MessageSquare,
-  Globe,
-  Radio,
 } from 'lucide-react';
-import { NotificationChannel, NotificationChannelCreatePayload } from '../types';
+import { NotificationChannel } from '../types';
 import { api } from '../services/api';
+import { LocalizedText, useI18n } from '../i18n';
 
-const ALL_EVENTS = [
-  { id: 'session.started', label: 'Session Started' },
-  { id: 'session.stopped', label: 'Session Stopped' },
-  { id: 'quota.warning', label: 'Quota Warning (≤10 CCU)' },
-  { id: 'quota.hard_stop', label: 'Quota Hard-Stop (≤2 CCU)' },
-  { id: 'job.started', label: 'Job Started' },
-  { id: 'job.finished', label: 'Job Finished / Completed' },
-  { id: 'job.failed', label: 'Job Failed' },
-  { id: 'orphan.discovered', label: 'Orphan Instance Discovered' },
-];
+const ALL_EVENT_IDS = [
+  'session.started',
+  'session.stopped',
+  'quota.warning',
+  'quota.hard_stop',
+  'job.started',
+  'job.finished',
+  'job.failed',
+  'orphan.discovered',
+] as const;
 
 export const NotificationsPage: React.FC = () => {
+  const { t, tm, formatActionError, formatEventLabel, formatNotificationProvider } = useI18n();
   const [channels, setChannels] = useState<NotificationChannel[]>([]);
   const [loading, setLoading] = useState(true);
-  const [testResult, setTestResult] = useState<{ channelId: string; success: boolean; response: string } | null>(null);
+  const [testResult, setTestResult] = useState<{
+    channelId: string;
+    success: boolean;
+    response: LocalizedText;
+  } | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingChannel, setEditingChannel] = useState<NotificationChannel | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [modalError, setModalError] = useState<string | null>(null);
+  const [modalError, setModalError] = useState<LocalizedText | null>(null);
 
   // Form State
   const [name, setName] = useState('');
@@ -115,7 +119,7 @@ export const NotificationsPage: React.FC = () => {
   const handleSaveChannel = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
-      setModalError('Please enter a channel name.');
+      setModalError({ key: 'notifications.missingNameError' });
       return;
     }
 
@@ -152,19 +156,19 @@ export const NotificationsPage: React.FC = () => {
       resetForm();
       fetchChannels();
     } catch (err: any) {
-      setModalError(err.message || 'Failed to save channel');
+      setModalError(err.message ? { raw: err.message } : { key: 'notifications.saveFailed' });
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleDeleteChannel = async (id: string, chName: string) => {
-    if (!confirm(`Are you sure you want to delete notification channel "${chName}"?`)) return;
+    if (!confirm(t('notifications.confirmDelete', { name: chName }))) return;
     try {
       await api.deleteNotificationChannel(id);
       fetchChannels();
     } catch (err: any) {
-      alert(`Failed to delete channel: ${err.message}`);
+      alert(formatActionError('notifications.deleteFailed', err?.message));
     }
   };
 
@@ -176,13 +180,13 @@ export const NotificationsPage: React.FC = () => {
       setTestResult({
         channelId: id,
         success: res.success,
-        response: res.response,
+        response: { raw: res.response },
       });
     } catch (err: any) {
       setTestResult({
         channelId: id,
         success: false,
-        response: err.message || 'Test delivery failed',
+        response: err.message ? { raw: err.message } : { key: 'notifications.testFailedFallback' },
       });
     } finally {
       setTestingId(null);
@@ -190,32 +194,32 @@ export const NotificationsPage: React.FC = () => {
   };
 
   return (
-    <div className="p-8 max-w-7xl mx-auto space-y-6">
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2.5">
             <Bell className="w-6 h-6 text-amber-400" />
-            Multi-Channel Notification Engine
+            {t('notifications.title')}
           </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Dispatch real-time alerts to Feishu, DingTalk, WeChat Work, Telegram, Bark, Slack, and generic webhooks with AES-256-GCM Vault encryption.
-          </p>
+          <p className="text-sm text-slate-400 mt-1">{t('notifications.subtitle')}</p>
         </div>
         <div className="flex items-center gap-3">
           <button
+            type="button"
             onClick={fetchChannels}
             className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 transition"
-            title="Refresh channels"
+            title={t('notifications.refreshTooltip')}
           >
-            <RefreshCw className="w-4 h-4" />
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
           <button
+            type="button"
             onClick={openCreateModal}
             className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition shadow"
           >
             <Plus className="w-4 h-4" />
-            Add Channel
+            {t('notifications.addChannel')}
           </button>
         </div>
       </div>
@@ -237,13 +241,15 @@ export const NotificationsPage: React.FC = () => {
             )}
             <div>
               <p className="font-semibold">
-                {testResult.success ? 'Webhook Probe Delivered Successfully' : 'Webhook Probe Failed'}
+                {testResult.success ? t('notifications.probeSuccess') : t('notifications.probeFailed')}
               </p>
-              <p className="text-xs opacity-90 font-mono mt-0.5 break-all">{testResult.response}</p>
+              <p className="text-xs opacity-90 font-mono mt-0.5 break-all">{tm(testResult.response)}</p>
             </div>
           </div>
           <button
+            type="button"
             onClick={() => setTestResult(null)}
+            title={t('common.close')}
             className="text-slate-400 hover:text-white text-xs font-bold"
           >
             ✕
@@ -255,7 +261,7 @@ export const NotificationsPage: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {channels.length === 0 ? (
           <div className="col-span-full bg-slate-900 border border-slate-800 rounded-xl p-12 text-center text-slate-500">
-            No notification channels configured yet. Click &quot;Add Channel&quot; to connect a bot or webhook.
+            {t('notifications.noChannels')}
           </div>
         ) : (
           channels.map((ch) => (
@@ -275,7 +281,7 @@ export const NotificationsPage: React.FC = () => {
                     <div>
                       <h3 className="font-semibold text-white text-sm">{ch.name}</h3>
                       <span className="text-[11px] font-mono uppercase font-bold text-slate-400 tracking-wider">
-                        {ch.provider}
+                        {formatNotificationProvider(ch.provider)}
                       </span>
                     </div>
                   </div>
@@ -286,7 +292,7 @@ export const NotificationsPage: React.FC = () => {
                         : 'bg-slate-800 text-slate-400 border border-slate-700'
                     }`}
                   >
-                    {ch.enabled ? 'Enabled' : 'Disabled'}
+                    {ch.enabled ? t('notifications.enabled') : t('notifications.disabled')}
                   </span>
                 </div>
 
@@ -294,12 +300,13 @@ export const NotificationsPage: React.FC = () => {
                 <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800/80 mb-3 text-xs text-slate-400 font-mono space-y-1">
                   <div className="flex items-center gap-1.5 text-slate-300 font-sans font-medium text-[11px]">
                     <Shield className="w-3.5 h-3.5 text-indigo-400" />
-                    AES-256-GCM Vault Protected
+                    {t('notifications.vaultProtected')}
                   </div>
                   {ch.config_masked &&
                     Object.entries(ch.config_masked).map(([k, v]) => (
                       <div key={k} className="truncate">
-                        <span className="text-slate-500">{k}:</span> <span className="text-slate-300">{String(v)}</span>
+                        <span className="text-slate-500">{k}:</span>{' '}
+                        <span className="text-slate-300">{String(v)}</span>
                       </div>
                     ))}
                 </div>
@@ -307,15 +314,16 @@ export const NotificationsPage: React.FC = () => {
                 {/* Subscribed Events Tags */}
                 <div className="mb-4">
                   <span className="text-[11px] text-slate-400 font-medium block mb-1.5">
-                    Subscribed Events ({ch.events.length})
+                    {t('notifications.subscribedEventsCount', { count: ch.events.length })}
                   </span>
                   <div className="flex flex-wrap gap-1">
                     {ch.events.map((ev) => (
                       <span
                         key={ev}
+                        title={ev}
                         className="text-[10px] px-2 py-0.5 bg-slate-800 text-slate-300 rounded border border-slate-700"
                       >
-                        {ev}
+                        {formatEventLabel(ev)}
                       </span>
                     ))}
                   </div>
@@ -325,26 +333,29 @@ export const NotificationsPage: React.FC = () => {
               {/* Card Actions */}
               <div className="flex items-center justify-between pt-3 border-t border-slate-800 text-xs">
                 <button
+                  type="button"
                   onClick={() => handleTestChannel(ch.id)}
                   disabled={testingId === ch.id}
                   className="flex items-center gap-1 px-3 py-1.5 bg-indigo-950/70 hover:bg-indigo-900 border border-indigo-800/60 rounded text-indigo-300 hover:text-white transition font-medium disabled:opacity-50"
-                  title="Send test verification alert"
+                  title={t('notifications.testTooltip')}
                 >
                   <Send className="w-3.5 h-3.5" />
-                  <span>{testingId === ch.id ? 'Sending...' : 'Test Webhook'}</span>
+                  <span>{testingId === ch.id ? t('notifications.sending') : t('notifications.testWebhook')}</span>
                 </button>
                 <div className="flex items-center gap-1">
                   <button
+                    type="button"
                     onClick={() => openEditModal(ch)}
                     className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition"
-                    title="Edit Channel"
+                    title={t('notifications.editTooltip')}
                   >
                     <Edit2 className="w-4 h-4" />
                   </button>
                   <button
+                    type="button"
                     onClick={() => handleDeleteChannel(ch.id, ch.name)}
                     className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-slate-800 rounded transition"
-                    title="Delete Channel"
+                    title={t('notifications.deleteTooltip')}
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -362,26 +373,33 @@ export const NotificationsPage: React.FC = () => {
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
                 <Bell className="w-5 h-5 text-indigo-400" />
-                {editingChannel ? 'Edit Notification Channel' : 'Add Notification Channel'}
+                {editingChannel ? t('notifications.modalEditTitle') : t('notifications.modalAddTitle')}
               </h2>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-white">
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                title={t('common.close')}
+                className="text-slate-400 hover:text-white"
+              >
                 ✕
               </button>
             </div>
 
             {modalError && (
               <div className="p-3 bg-rose-950/50 border border-rose-800/60 rounded-lg text-rose-300 text-xs">
-                {modalError}
+                {tm(modalError)}
               </div>
             )}
 
             <form onSubmit={handleSaveChannel} className="space-y-4 text-xs">
               {/* Channel Name */}
               <div>
-                <label className="block text-slate-300 font-medium mb-1">Channel Name</label>
+                <label className="block text-slate-300 font-medium mb-1">
+                  {t('notifications.channelNameLabel')}
+                </label>
                 <input
                   type="text"
-                  placeholder="e.g. SRE Lark Alerts"
+                  placeholder={t('notifications.channelNamePlaceholder')}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
@@ -391,19 +409,21 @@ export const NotificationsPage: React.FC = () => {
 
               {/* Provider */}
               <div>
-                <label className="block text-slate-300 font-medium mb-1">Webhook Provider</label>
+                <label className="block text-slate-300 font-medium mb-1">
+                  {t('notifications.providerLabel')}
+                </label>
                 <select
                   value={provider}
                   onChange={(e) => setProvider(e.target.value as any)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
                 >
-                  <option value="feishu">Feishu / Lark (Interactive Card)</option>
-                  <option value="dingtalk">DingTalk / 钉钉 (Markdown + Sign)</option>
-                  <option value="wecom">WeChat Work / 企业微信</option>
-                  <option value="telegram">Telegram Bot</option>
-                  <option value="bark">Bark (iOS Push)</option>
-                  <option value="slack">Slack Incoming Webhook</option>
-                  <option value="webhook">Generic Webhook (JSON POST)</option>
+                  <option value="feishu">{t('notifications.providerFeishu')}</option>
+                  <option value="dingtalk">{t('notifications.providerDingtalk')}</option>
+                  <option value="wecom">{t('notifications.providerWecom')}</option>
+                  <option value="telegram">{t('notifications.providerTelegram')}</option>
+                  <option value="bark">{t('notifications.providerBark')}</option>
+                  <option value="slack">{t('notifications.providerSlack')}</option>
+                  <option value="webhook">{t('notifications.providerWebhook')}</option>
                 </select>
               </div>
 
@@ -411,7 +431,8 @@ export const NotificationsPage: React.FC = () => {
               {provider !== 'telegram' && provider !== 'bark' && (
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">
-                    Webhook URL {editingChannel && '(Leave empty to keep existing)'}
+                    {t('notifications.webhookUrlLabel')}{' '}
+                    {editingChannel && t('notifications.keepExistingSuffix')}
                   </label>
                   <input
                     type="url"
@@ -427,7 +448,7 @@ export const NotificationsPage: React.FC = () => {
               {(provider === 'feishu' || provider === 'dingtalk') && (
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">
-                    Secret (Optional HMAC-SHA256 Signature)
+                    {t('notifications.secretLabel')}
                   </label>
                   <input
                     type="password"
@@ -442,7 +463,9 @@ export const NotificationsPage: React.FC = () => {
               {provider === 'telegram' && (
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-slate-300 font-medium mb-1">Bot Token</label>
+                    <label className="block text-slate-300 font-medium mb-1">
+                      {t('notifications.botTokenLabel')}
+                    </label>
                     <input
                       type="password"
                       placeholder="123456:ABC-DEF..."
@@ -453,7 +476,9 @@ export const NotificationsPage: React.FC = () => {
                     />
                   </div>
                   <div>
-                    <label className="block text-slate-300 font-medium mb-1">Chat ID</label>
+                    <label className="block text-slate-300 font-medium mb-1">
+                      {t('notifications.chatIdLabel')}
+                    </label>
                     <input
                       type="text"
                       placeholder="-10012345678"
@@ -468,7 +493,9 @@ export const NotificationsPage: React.FC = () => {
 
               {provider === 'bark' && (
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Bark Device Key</label>
+                  <label className="block text-slate-300 font-medium mb-1">
+                    {t('notifications.barkDeviceKeyLabel')}
+                  </label>
                   <input
                     type="text"
                     placeholder="YourBarkDeviceKey"
@@ -482,17 +509,19 @@ export const NotificationsPage: React.FC = () => {
 
               {/* Event Subscriptions */}
               <div>
-                <label className="block text-slate-300 font-medium mb-2">Subscribe to Events</label>
+                <label className="block text-slate-300 font-medium mb-2">
+                  {t('notifications.subscribeEventsLabel')}
+                </label>
                 <div className="grid grid-cols-2 gap-2 bg-slate-950 p-3 rounded-lg border border-slate-800">
-                  {ALL_EVENTS.map((ev) => (
-                    <label key={ev.id} className="flex items-center gap-2 text-slate-300 cursor-pointer">
+                  {ALL_EVENT_IDS.map((eventId) => (
+                    <label key={eventId} className="flex items-center gap-2 text-slate-300 cursor-pointer">
                       <input
                         type="checkbox"
-                        checked={selectedEvents.includes(ev.id)}
-                        onChange={() => handleToggleEvent(ev.id)}
-                        className="rounded bg-slate-900 border-slate-700 text-indigo-600 focus:ring-0"
+                        checked={selectedEvents.includes(eventId)}
+                        onChange={() => handleToggleEvent(eventId)}
+                        className="rounded bg-slate-950 border-slate-700 text-indigo-600 focus:ring-0"
                       />
-                      <span>{ev.label}</span>
+                      <span>{formatEventLabel(eventId)}</span>
                     </label>
                   ))}
                 </div>
@@ -508,7 +537,7 @@ export const NotificationsPage: React.FC = () => {
                   className="rounded bg-slate-950 border-slate-800 text-indigo-600 focus:ring-0"
                 />
                 <label htmlFor="enabledCheck" className="text-slate-300 font-medium cursor-pointer">
-                  Enable notification channel
+                  {t('notifications.enableChannelLabel')}
                 </label>
               </div>
 
@@ -519,14 +548,18 @@ export const NotificationsPage: React.FC = () => {
                   onClick={() => setIsModalOpen(false)}
                   className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition"
                 >
-                  Cancel
+                  {t('common.cancel')}
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
                   className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition flex items-center gap-1.5 font-medium disabled:opacity-50"
                 >
-                  {submitting ? 'Saving...' : editingChannel ? 'Update Channel' : 'Create Channel'}
+                  {submitting
+                    ? t('common.saving')
+                    : editingChannel
+                    ? t('notifications.updatingChannel')
+                    : t('notifications.creatingChannel')}
                 </button>
               </div>
             </form>

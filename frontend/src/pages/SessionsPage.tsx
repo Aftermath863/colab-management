@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Cpu, Play, Square, ExternalLink, Terminal } from 'lucide-react';
+import { Play, Square, ExternalLink, Terminal } from 'lucide-react';
 import { Session } from '../types';
+import { useI18n } from '../i18n';
 
 interface Props {
   sessions: Session[];
@@ -17,6 +18,7 @@ export const SessionsPage: React.FC<Props> = ({
   onStopSession,
   onRefresh,
 }) => {
+  const { t, formatActionError, formatSessionStatus, formatShape } = useI18n();
   const [filter, setFilter] = useState<'all' | 'active' | 'stopped'>('all');
   const [stoppingId, setStoppingId] = useState<string | null>(null);
 
@@ -27,7 +29,7 @@ export const SessionsPage: React.FC<Props> = ({
   });
 
   const handleStop = async (sessionId: string) => {
-    if (!confirm('Are you sure you want to stop this runtime? Unsaved memory state will be lost.')) {
+    if (!confirm(t('sessions.confirmStop'))) {
       return;
     }
     setStoppingId(sessionId);
@@ -35,27 +37,32 @@ export const SessionsPage: React.FC<Props> = ({
       await onStopSession(sessionId);
       await onRefresh();
     } catch (err: any) {
-      alert(`Failed to stop session: ${err.message}`);
+      alert(formatActionError('sessions.stopFailed', err?.message));
     } finally {
       setStoppingId(null);
     }
   };
 
+  const tabLabels = {
+    all: t('sessions.filterAll'),
+    active: t('sessions.filterActive'),
+    stopped: t('sessions.filterStopped'),
+  };
+
   return (
-    <div className="p-8 max-w-7xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-white tracking-tight">Compute Sessions</h2>
-          <p className="text-sm text-slate-400 mt-1">
-            Provision, inspect, and interact with running Colab instances.
-          </p>
+          <h2 className="text-2xl font-bold text-white tracking-tight">{t('sessions.title')}</h2>
+          <p className="text-sm text-slate-400 mt-1">{t('sessions.subtitle')}</p>
         </div>
 
         <button
+          type="button"
           onClick={onNewSession}
           className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium text-white transition flex items-center gap-2 shadow-lg shadow-blue-600/20"
         >
-          <Play className="w-4 h-4 fill-current" /> Launch Runtime
+          <Play className="w-4 h-4 fill-current" /> {t('sessions.launchRuntime')}
         </button>
       </div>
 
@@ -63,6 +70,7 @@ export const SessionsPage: React.FC<Props> = ({
       <div className="flex items-center gap-2 border-b border-slate-750 pb-3">
         {(['all', 'active', 'stopped'] as const).map((tab) => (
           <button
+            type="button"
             key={tab}
             onClick={() => setFilter(tab)}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wider transition ${
@@ -71,11 +79,15 @@ export const SessionsPage: React.FC<Props> = ({
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            {tab} ({sessions.filter((s) => {
-              if (tab === 'active') return s.status !== 'STOPPED' && s.status !== 'FAILED';
-              if (tab === 'stopped') return s.status === 'STOPPED' || s.status === 'FAILED';
-              return true;
-            }).length})
+            {tabLabels[tab]} (
+            {
+              sessions.filter((s) => {
+                if (tab === 'active') return s.status !== 'STOPPED' && s.status !== 'FAILED';
+                if (tab === 'stopped') return s.status === 'STOPPED' || s.status === 'FAILED';
+                return true;
+              }).length
+            }
+            )
           </button>
         ))}
       </div>
@@ -83,21 +95,19 @@ export const SessionsPage: React.FC<Props> = ({
       {/* Sessions Table */}
       <div className="bg-slate-800/80 border border-slate-750 rounded-xl overflow-hidden">
         {filteredSessions.length === 0 ? (
-          <div className="p-12 text-center text-slate-500">
-            No sessions match the selected filter.
-          </div>
+          <div className="p-12 text-center text-slate-500">{t('sessions.noMatchingSessions')}</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm text-slate-300">
               <thead className="bg-slate-850 text-xs uppercase font-semibold text-slate-400 border-b border-slate-750">
                 <tr>
-                  <th className="px-6 py-3">Session</th>
-                  <th className="px-6 py-3">Accelerator</th>
-                  <th className="px-6 py-3">Account</th>
-                  <th className="px-6 py-3">Status</th>
-                  <th className="px-6 py-3">SSH Port</th>
-                  <th className="px-6 py-3">Created</th>
-                  <th className="px-6 py-3 text-right">Actions</th>
+                  <th className="px-6 py-3">{t('sessions.colSession')}</th>
+                  <th className="px-6 py-3">{t('sessions.colAccelerator')}</th>
+                  <th className="px-6 py-3">{t('sessions.colAccount')}</th>
+                  <th className="px-6 py-3">{t('sessions.colStatus')}</th>
+                  <th className="px-6 py-3">{t('sessions.colSshPort')}</th>
+                  <th className="px-6 py-3">{t('sessions.colCreated')}</th>
+                  <th className="px-6 py-3 text-right">{t('sessions.colActions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-750">
@@ -111,7 +121,7 @@ export const SessionsPage: React.FC<Props> = ({
                       </td>
                       <td className="px-6 py-4">
                         <span className="px-2 py-0.5 text-xs font-mono bg-blue-900/60 text-blue-300 rounded border border-blue-700/50">
-                          {sess.accelerator} ({sess.shape})
+                          {sess.accelerator} ({formatShape(sess.shape)})
                         </span>
                       </td>
                       <td className="px-6 py-4 text-xs font-mono text-slate-400">
@@ -127,7 +137,7 @@ export const SessionsPage: React.FC<Props> = ({
                               : 'bg-slate-800 text-slate-400 border border-slate-700'
                           }`}
                         >
-                          {sess.status}
+                          {formatSessionStatus(sess.status)}
                         </span>
                       </td>
                       <td className="px-6 py-4 text-xs font-mono">
@@ -138,7 +148,7 @@ export const SessionsPage: React.FC<Props> = ({
                         )}
                       </td>
                       <td className="px-6 py-4 text-xs text-slate-400">
-                        {sess.created_at?.split(' ')[0] || 'Recently'}
+                        {sess.created_at?.split(' ')[0] || t('sessions.recently')}
                       </td>
                       <td className="px-6 py-4 text-right space-x-2">
                         {sess.colab_web_url && (
@@ -148,21 +158,24 @@ export const SessionsPage: React.FC<Props> = ({
                             rel="noopener noreferrer"
                             className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-600/80 hover:bg-amber-600 rounded text-xs font-medium text-white transition"
                           >
-                            <ExternalLink className="w-3 h-3" /> Colab
+                            <ExternalLink className="w-3 h-3" /> {t('sessions.openColab')}
                           </a>
                         )}
 
                         {isActive && (
                           <>
                             <button
+                              type="button"
                               onClick={() => onOpenSession(sess)}
                               className="px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded text-xs font-medium text-white transition inline-flex items-center gap-1"
                             >
-                              <Terminal className="w-3 h-3" /> Workbench
+                              <Terminal className="w-3 h-3" /> {t('sessions.workbench')}
                             </button>
                             <button
+                              type="button"
                               onClick={() => handleStop(sess.id)}
                               disabled={stoppingId === sess.id}
+                              title={t('sessions.stopTooltip')}
                               className="px-2.5 py-1 bg-red-950/60 hover:bg-red-900 border border-red-800/60 rounded text-xs text-red-300 transition"
                             >
                               <Square className="w-3 h-3 fill-current inline" />
