@@ -212,30 +212,36 @@ export function openCommandPalette(): void {
 }
 
 export function isInteractiveDragExcluded(target: EventTarget | null): boolean {
-  if (typeof Element === 'undefined' || !(target instanceof Element)) {
+  if (!target || typeof Element === 'undefined') {
+    return false;
+  }
+  const el = target instanceof Element ? target : (target as Node).parentElement;
+  if (!el || typeof el.closest !== 'function') {
     return false;
   }
   return Boolean(
-    target.closest(
+    el.closest(
       'button, a, input, select, textarea, label, [role="button"], [contenteditable="true"], [data-no-drag="true"], .mac-no-drag'
     )
   );
 }
 
-export async function copyTextToClipboard(text: string): Promise<boolean> {
-  if (!hasWindow()) return false;
+export async function copyTextToClipboard(text: string, withHaptic = true): Promise<boolean> {
+  if (!hasWindow() || !text) return false;
   try {
     if (navigator.clipboard && window.isSecureContext) {
       await navigator.clipboard.writeText(text);
-      triggerHaptic('success');
+      if (withHaptic) triggerHaptic('success');
       return true;
     }
   } catch {
     // Fall back to execCommand below
   }
+  if (typeof document === 'undefined' || !document.body) return false;
   try {
     const ta = document.createElement('textarea');
     ta.value = text;
+    ta.setAttribute('readonly', '');
     ta.style.position = 'fixed';
     ta.style.opacity = '0';
     ta.style.pointerEvents = 'none';
@@ -244,7 +250,7 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
     ta.select();
     const ok = document.execCommand('copy');
     document.body.removeChild(ta);
-    if (ok) triggerHaptic('success');
+    if (ok && withHaptic) triggerHaptic('success');
     return ok;
   } catch {
     return false;
