@@ -11,6 +11,7 @@ import {
   triggerHaptic,
 } from '../desktop/macBridge';
 import { useToast } from '../desktop/ToastContext';
+import { MODAL_BACKDROP_CLASSES, ModalPortal } from './ModalPortal';
 
 interface SSHHelperModalProps {
   sessionId: string;
@@ -91,18 +92,19 @@ export const SSHHelperModal: React.FC<SSHHelperModalProps> = ({
   const hostAlias = `colab-${sessionName || sessionId}`;
 
   return (
-    <div
-      className="fixed inset-0 z-50 mac-modal-backdrop flex items-center justify-center p-4"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-    >
+    <ModalPortal>
       <div
-        className="mac-modal-panel mac-glass-heavy border border-white/[0.1] rounded-2xl max-w-2xl w-full shadow-glass-lg overflow-hidden flex flex-col"
-        onClick={(e) => e.stopPropagation()}
+        className={MODAL_BACKDROP_CLASSES}
+        onClick={onClose}
+        role="dialog"
+        aria-modal="true"
       >
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.08] bg-white/[0.02]">
+        <div
+          className="mac-modal-panel mac-glass-heavy border border-white/[0.1] rounded-2xl max-w-2xl w-full shadow-glass-lg overflow-hidden flex flex-col"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.08] bg-white/[0.02] shrink-0">
           <div className="flex items-center gap-2.5">
             <span className="w-8 h-8 rounded-xl bg-indigo-500/15 border border-indigo-400/30 flex items-center justify-center text-indigo-400">
               <Terminal className="w-4 h-4" />
@@ -123,7 +125,7 @@ export const SSHHelperModal: React.FC<SSHHelperModalProps> = ({
         </div>
 
         {/* Content */}
-        <div className="p-6 space-y-6 overflow-y-auto max-h-[80vh]">
+        <div className="p-6 space-y-6 overflow-y-auto min-h-0 flex-1">
           {loading ? (
             <div className="py-12 flex flex-col items-center justify-center gap-3 text-slate-400 text-sm">
               <Loader2 className="w-6 h-6 animate-spin text-indigo-400" />
@@ -263,7 +265,7 @@ export const SSHHelperModal: React.FC<SSHHelperModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-3.5 bg-black/25 border-t border-white/[0.07] flex justify-end">
+        <div className="px-6 py-3.5 bg-black/25 border-t border-white/[0.07] flex justify-end shrink-0">
           <button
             type="button"
             onClick={onClose}
@@ -274,5 +276,6 @@ export const SSHHelperModal: React.FC<SSHHelperModalProps> = ({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 };

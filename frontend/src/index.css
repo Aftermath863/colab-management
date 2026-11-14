@@ -43,7 +43,6 @@
       radial-gradient(64rem 42rem at 12% -6%, rgba(99, 102, 241, 0.14), transparent 62%),
       radial-gradient(56rem 38rem at 88% 8%, rgba(6, 182, 212, 0.095), transparent 60%),
       radial-gradient(46rem 34rem at 54% 106%, rgba(245, 158, 11, 0.065), transparent 64%);
-    transform: translateZ(0);
   }
 
   html.is-mac-app .mac-ambient-bg {
@@ -252,18 +251,26 @@
   }
 
   .mac-page-enter {
-    animation: macPageEnter 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation: macPageEnter 240ms cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   .mac-modal-backdrop {
-    background-color: rgba(2, 6, 23, 0.68);
-    backdrop-filter: blur(12px) saturate(140%);
-    -webkit-backdrop-filter: blur(12px) saturate(140%);
+    background-color: rgba(2, 6, 23, 0.72);
+    backdrop-filter: blur(14px) saturate(145%);
+    -webkit-backdrop-filter: blur(14px) saturate(145%);
     animation: macBackdropFade 190ms cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 
   .mac-modal-panel {
+    margin-top: auto;
+    margin-bottom: auto;
+    max-height: calc(100vh - 6rem);
     animation: macModalSpring 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .mac-palette-panel {
+    margin-top: 0;
+    margin-bottom: auto;
   }
 
   .mac-toast-enter {
@@ -278,7 +285,7 @@
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
   }
 }
 

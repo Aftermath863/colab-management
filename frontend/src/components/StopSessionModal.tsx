@@ -3,6 +3,7 @@ import { AlertTriangle, Camera, Loader2, Square, X } from 'lucide-react';
 import { Session } from '../types';
 import { useI18n } from '../i18n';
 import { triggerHaptic } from '../desktop/macBridge';
+import { MODAL_BACKDROP_CLASSES, ModalPortal } from './ModalPortal';
 
 interface StopSessionModalProps {
   session: Session;
@@ -42,18 +43,19 @@ export const StopSessionModal: React.FC<StopSessionModalProps> = ({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 mac-modal-backdrop flex items-center justify-center p-4"
-      onClick={() => {
-        if (!stopping) onClose();
-      }}
-      role="dialog"
-      aria-modal="true"
-    >
+    <ModalPortal>
       <div
-        className="w-full max-w-md mac-modal-panel mac-glass-heavy border border-white/[0.1] rounded-2xl shadow-glass-lg overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
+        className={MODAL_BACKDROP_CLASSES}
+        onClick={() => {
+          if (!stopping) onClose();
+        }}
+        role="dialog"
+        aria-modal="true"
       >
+        <div
+          className="w-full max-w-md mac-modal-panel mac-glass-heavy border border-white/[0.1] rounded-2xl shadow-glass-lg overflow-y-auto"
+          onClick={(e) => e.stopPropagation()}
+        >
         <div className="px-5 py-4 bg-white/[0.02] border-b border-white/[0.08] flex items-center justify-between">
           <div className="flex items-center space-x-2.5">
             <span className="w-7 h-7 rounded-lg bg-amber-500/15 border border-amber-400/30 flex items-center justify-center text-amber-400">
@@ -116,5 +118,6 @@ export const StopSessionModal: React.FC<StopSessionModalProps> = ({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 };

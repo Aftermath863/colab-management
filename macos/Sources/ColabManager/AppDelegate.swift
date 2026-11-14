@@ -226,41 +226,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, AppMenuActions {
            let info = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            (info["found"] as? Bool) == true,
            let domX = info["x"] as? Double,
-           let domY = info["y"] as? Double,
-           let window = mainWindowController.window {
+           let domY = info["y"] as? Double {
             beforeText = (info["beforeText"] as? String) ?? ""
             targetLabel = (info["label"] as? String) ?? ""
 
-            let localPoint = NSPoint(x: domX, y: max(1, webView.bounds.height - domY))
-            let windowPoint = containerView.convert(localPoint, to: nil)
-            let timestamp = ProcessInfo.processInfo.systemUptime
-
-            if let downEvent = NSEvent.mouseEvent(
-                with: .leftMouseDown,
-                location: windowPoint,
-                modifierFlags: [],
-                timestamp: timestamp,
-                windowNumber: window.windowNumber,
-                context: nil,
-                eventNumber: 1,
-                clickCount: 1,
-                pressure: 1.0
-            ),
-            let upEvent = NSEvent.mouseEvent(
-                with: .leftMouseUp,
-                location: windowPoint,
-                modifierFlags: [],
-                timestamp: timestamp + 0.03,
-                windowNumber: window.windowNumber,
-                context: nil,
-                eventNumber: 1,
-                clickCount: 1,
-                pressure: 0.0
-            ) {
-                NSApp.sendEvent(downEvent)
-                NSApp.sendEvent(upEvent)
-            }
-
+            sendRealMouseClick(on: webView, containerView: containerView, domX: domX, domY: domY)
             try? await Task.sleep(nanoseconds: 450_000_000)
 
             let afterLookupJS = """
@@ -271,6 +241,98 @@ final class AppDelegate: NSObject, NSApplicationDelegate, AppMenuActions {
             """
             afterText = (await evaluateJSString(on: webView, script: afterLookupJS)) ?? ""
             clickTriggeredDOMChange = !afterText.isEmpty && afterText != beforeText
+        }
+
+        // Verify modal geometry across multiple navigation tabs & primary action buttons
+        let modalFlows: [(key: String, navIndex: Int?, buttonTexts: [String])] = [
+            ("jobsSubmit", 2, ["提交任务", "Submit Job"]),
+            ("templatesCreate", 4, ["新建模板", "New Template"]),
+            ("notificationsAdd", 5, ["添加渠道", "Add Channel"]),
+            ("sidebarNewSession", nil, ["启动实例", "创建实例", "Launch Runtime"])
+        ]
+
+        var modalChecks: [[String: Any]] = []
+        for flow in modalFlows {
+            if let navIndex = flow.navIndex {
+                let navScript = """
+                (function() {
+                  var btns = Array.from(document.querySelectorAll('aside nav button'));
+                  var el = btns[\(navIndex)];
+                  if (!el) return JSON.stringify({ found: false });
+                  var r = el.getBoundingClientRect();
+                  return JSON.stringify({ found: true, x: r.left + r.width / 2, y: r.top + r.height / 2 });
+                })();
+                """
+                if let navPos = await evaluateJSONObject(on: webView, script: navScript),
+                   (navPos["found"] as? Bool) == true,
+                   let nx = navPos["x"] as? Double,
+                   let ny = navPos["y"] as? Double {
+                    sendRealMouseClick(on: webView, containerView: containerView, domX: nx, domY: ny)
+                    try? await Task.sleep(nanoseconds: 350_000_000)
+                }
+            }
+
+            let literals = flow.buttonTexts
+                .map { "\"\($0.replacingOccurrences(of: "\"", with: "\\\""))\"" }
+                .joined(separator: ", ")
+            let btnScript = """
+            (function() {
+              var needles = [\(literals)];
+              var btns = Array.from(document.querySelectorAll('button'));
+              var target = btns.find(function(b) {
+                var txt = (b.innerText || '').trim();
+                return needles.some(function(n) { return txt.indexOf(n) !== -1; });
+              });
+              if (!target) return JSON.stringify({ found: false });
+              var r = target.getBoundingClientRect();
+              return JSON.stringify({ found: true, x: r.left + r.width / 2, y: r.top + r.height / 2, label: (target.innerText || '').trim() });
+            })();
+            """
+            var entry: [String: Any] = ["flow": flow.key]
+            if let btnPos = await evaluateJSONObject(on: webView, script: btnScript),
+               (btnPos["found"] as? Bool) == true,
+               let bx = btnPos["x"] as? Double,
+               let by = btnPos["y"] as? Double {
+                entry["buttonLabel"] = (btnPos["label"] as? String) ?? ""
+                sendRealMouseClick(on: webView, containerView: containerView, domX: bx, domY: by)
+                try? await Task.sleep(nanoseconds: 350_000_000)
+
+                let measureScript = """
+                (function() {
+                  var bd = document.querySelector('.mac-modal-backdrop');
+                  var panel = document.querySelector('.mac-modal-panel');
+                  if (!bd || !panel) {
+                    return JSON.stringify({ opened: false });
+                  }
+                  var br = bd.getBoundingClientRect();
+                  var pr = panel.getBoundingClientRect();
+                  var iw = window.innerWidth;
+                  var ih = window.innerHeight;
+                  return JSON.stringify({
+                    opened: true,
+                    mountedOnBody: bd.parentElement === document.body,
+                    innerWidth: iw,
+                    innerHeight: ih,
+                    backdrop: { left: br.left, top: br.top, width: br.width, height: br.height },
+                    panel: { left: pr.left, top: pr.top, width: pr.width, height: pr.height, bottom: pr.bottom },
+                    backdropCoversViewport: Math.abs(br.left) <= 1 && Math.abs(br.top) <= 1 && Math.abs(br.width - iw) <= 1 && Math.abs(br.height - ih) <= 1,
+                    panelUnclippedAndCentered: pr.top >= 52 && pr.bottom <= ih - 36
+                  });
+                })();
+                """
+                if let measured = await evaluateJSONObject(on: webView, script: measureScript) {
+                    for (k, v) in measured {
+                        entry[k] = v
+                    }
+                }
+                // Click empty top-left backdrop area to close modal cleanly before next flow
+                sendRealMouseClick(on: webView, containerView: containerView, domX: 24, domY: 88)
+                try? await Task.sleep(nanoseconds: 280_000_000)
+            } else {
+                entry["opened"] = false
+                entry["error"] = "Trigger button not found"
+            }
+            modalChecks.append(entry)
         }
 
         let windowIsKey = mainWindowController.window?.isKeyWindow ?? false
@@ -292,7 +354,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, AppMenuActions {
             "clickedTargetLabel": targetLabel,
             "beforeText": beforeText,
             "afterText": afterText,
-            "clickTriggeredDOMChange": clickTriggeredDOMChange
+            "clickTriggeredDOMChange": clickTriggeredDOMChange,
+            "modalChecks": modalChecks
         ]
 
         if let jsonData = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) {
@@ -300,6 +363,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, AppMenuActions {
         }
 
         NSApp.terminate(nil)
+    }
+
+    private func sendRealMouseClick(
+        on webView: WorkbenchWebView,
+        containerView: WorkbenchContainerView,
+        domX: Double,
+        domY: Double
+    ) {
+        guard let window = mainWindowController.window else { return }
+        let localPoint = NSPoint(x: domX, y: max(1, webView.bounds.height - domY))
+        let windowPoint = containerView.convert(localPoint, to: nil)
+        let timestamp = ProcessInfo.processInfo.systemUptime
+
+        if let downEvent = NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: windowPoint,
+            modifierFlags: [],
+            timestamp: timestamp,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 1,
+            clickCount: 1,
+            pressure: 1.0
+        ),
+        let upEvent = NSEvent.mouseEvent(
+            with: .leftMouseUp,
+            location: windowPoint,
+            modifierFlags: [],
+            timestamp: timestamp + 0.03,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 1,
+            clickCount: 1,
+            pressure: 0.0
+        ) {
+            NSApp.sendEvent(downEvent)
+            NSApp.sendEvent(upEvent)
+        }
+    }
+
+    private func evaluateJSONObject(on webView: WorkbenchWebView, script: String) async -> [String: Any]? {
+        guard let jsonStr = await evaluateJSString(on: webView, script: script),
+              let data = jsonStr.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return obj
     }
 
     private func evaluateJSString(on webView: WorkbenchWebView, script: String) async -> String? {

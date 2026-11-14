@@ -21,6 +21,7 @@ import {
 import { api } from '../services/api';
 import { Template, Secret, StorageProfile, Snapshot, Session } from '../types';
 import { LocalizedText, useI18n } from '../i18n';
+import { MODAL_BACKDROP_CLASSES, ModalPortal } from '../components/ModalPortal';
 import {
   isMacDesktop,
   triggerHaptic,
@@ -324,7 +325,7 @@ export const TemplatesPage: React.FC<TemplatesPageProps> = ({
   };
 
   return (
-    <div className="mac-page-enter max-w-7xl mx-auto px-4 sm:px-8 py-6 sm:py-8 space-y-6">
+    <div className="max-w-7xl mx-auto px-4 sm:px-8 py-6 sm:py-8 space-y-6">
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -782,14 +783,15 @@ export const TemplatesPage: React.FC<TemplatesPageProps> = ({
 
       {/* Delete Confirmation Modal */}
       {confirmDelete && (
-        <div
-          className="mac-modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4"
-          onClick={() => setConfirmDelete(null)}
-        >
+        <ModalPortal>
           <div
-            className="mac-modal-panel mac-card w-full max-w-md p-6 space-y-5 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
+            className={MODAL_BACKDROP_CLASSES}
+            onClick={() => setConfirmDelete(null)}
           >
+            <div
+              className="mac-modal-panel mac-card w-full max-w-md p-6 space-y-5 shadow-2xl overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-400/30 text-rose-300">
@@ -842,18 +844,20 @@ export const TemplatesPage: React.FC<TemplatesPageProps> = ({
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {/* Modal: Sync Snapshots from Google Drive */}
       {isSyncModalOpen && (
-        <div
-          className="mac-modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4"
-          onClick={() => setIsSyncModalOpen(false)}
-        >
+        <ModalPortal>
           <div
-            className="mac-modal-panel mac-card max-w-md w-full p-6 space-y-4 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
+            className={MODAL_BACKDROP_CLASSES}
+            onClick={() => setIsSyncModalOpen(false)}
           >
+            <div
+              className="mac-modal-panel mac-card max-w-md w-full p-6 space-y-4 shadow-2xl overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
             <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
               <h3 className="text-sm font-bold text-white">
                 {t('snapshots.syncSelectSessionTitle')}
@@ -934,36 +938,38 @@ export const TemplatesPage: React.FC<TemplatesPageProps> = ({
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {/* Modal: New Template */}
       {isTemplateModalOpen && (
-        <div
-          className="mac-modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4"
-          onClick={() => setIsTemplateModalOpen(false)}
-        >
+        <ModalPortal>
           <div
-            className="mac-modal-panel mac-card max-w-2xl w-full shadow-2xl overflow-hidden flex flex-col"
-            onClick={(e) => e.stopPropagation()}
+            className={MODAL_BACKDROP_CLASSES}
+            onClick={() => setIsTemplateModalOpen(false)}
           >
-            <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.08]">
-              <h3 className="text-lg font-semibold text-white">
-                {t('templates.modalCreateTemplateTitle')}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setIsTemplateModalOpen(false)}
-                title={t('common.close')}
-                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/[0.08] transition"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form
-              onSubmit={handleCreateTemplate}
-              className="p-6 space-y-4 overflow-y-auto max-h-[75vh]"
+            <div
+              className="mac-modal-panel mac-card max-w-2xl w-full shadow-2xl overflow-hidden flex flex-col"
+              onClick={(e) => e.stopPropagation()}
             >
+              <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.08] shrink-0">
+                <h3 className="text-lg font-semibold text-white">
+                  {t('templates.modalCreateTemplateTitle')}
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setIsTemplateModalOpen(false)}
+                  title={t('common.close')}
+                  className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/[0.08] transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form
+                onSubmit={handleCreateTemplate}
+                className="p-6 space-y-4 overflow-y-auto min-h-0 flex-1"
+              >
               <div>
                 <label className="block text-xs font-medium text-slate-300 mb-1">
                   {t('templates.tplNameLabel')}
@@ -1095,33 +1101,35 @@ export const TemplatesPage: React.FC<TemplatesPageProps> = ({
             </form>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {/* Modal: Add Secret */}
       {isSecretModalOpen && (
-        <div
-          className="mac-modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4"
-          onClick={() => setIsSecretModalOpen(false)}
-        >
+        <ModalPortal>
           <div
-            className="mac-modal-panel mac-card max-w-md w-full shadow-2xl overflow-hidden flex flex-col"
-            onClick={(e) => e.stopPropagation()}
+            className={MODAL_BACKDROP_CLASSES}
+            onClick={() => setIsSecretModalOpen(false)}
           >
-            <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.08]">
-              <h3 className="text-lg font-semibold text-white">
-                {t('templates.modalAddSecretTitle')}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setIsSecretModalOpen(false)}
-                title={t('common.close')}
-                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/[0.08] transition"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+            <div
+              className="mac-modal-panel mac-card max-w-md w-full shadow-2xl overflow-hidden flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.08] shrink-0">
+                <h3 className="text-lg font-semibold text-white">
+                  {t('templates.modalAddSecretTitle')}
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setIsSecretModalOpen(false)}
+                  title={t('common.close')}
+                  className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/[0.08] transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
 
-            <form onSubmit={handleCreateSecret} className="p-6 space-y-4">
+              <form onSubmit={handleCreateSecret} className="p-6 space-y-4 overflow-y-auto min-h-0 flex-1">
               <div>
                 <label className="block text-xs font-medium text-slate-300 mb-1">
                   {t('templates.secKeyNameLabel')}
@@ -1197,6 +1205,7 @@ export const TemplatesPage: React.FC<TemplatesPageProps> = ({
             </form>
           </div>
         </div>
+        </ModalPortal>
       )}
     </div>
   );

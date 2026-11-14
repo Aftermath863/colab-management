@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, AlertTriangle, CheckCircle2, Info, X } from 'lucide-react';
 import { dispatchToast, ToastDispatchDetail, ToastVariant, triggerHaptic } from './macBridge';
+import { ModalPortal } from '../components/ModalPortal';
 
 export type { ToastVariant };
 
@@ -211,14 +212,16 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     <ToastContext.Provider value={contextValue}>
       {children}
       {toasts.length > 0 && (
-        <div
-          aria-label="Notifications"
-          className="fixed top-14 right-4 z-[100] flex flex-col gap-2.5 w-[calc(100vw-2rem)] max-w-sm pointer-events-none"
-        >
-          {toasts.map((item) => (
-            <ToastCard key={item.id} toast={item} onDismiss={dismissToast} />
-          ))}
-        </div>
+        <ModalPortal>
+          <div
+            aria-label="Notifications"
+            className="fixed top-14 right-4 z-[100] flex flex-col gap-2.5 w-[calc(100vw-2rem)] max-w-sm pointer-events-none"
+          >
+            {toasts.map((item) => (
+              <ToastCard key={item.id} toast={item} onDismiss={dismissToast} />
+            ))}
+          </div>
+        </ModalPortal>
       )}
     </ToastContext.Provider>
   );

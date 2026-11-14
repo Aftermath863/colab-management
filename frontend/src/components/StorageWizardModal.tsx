@@ -5,6 +5,7 @@ import { StorageProfile } from '../types';
 import { LocalizedText, useI18n } from '../i18n';
 import { openExternalUrl, triggerHaptic } from '../desktop/macBridge';
 import { useToast } from '../desktop/ToastContext';
+import { MODAL_BACKDROP_CLASSES, ModalPortal } from './ModalPortal';
 
 interface StorageWizardModalProps {
   sessionId: string;
@@ -264,20 +265,21 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-50 mac-modal-backdrop flex items-center justify-center p-4"
-      onClick={() => {
-        if (!loading) onClose();
-      }}
-      role="dialog"
-      aria-modal="true"
-    >
+    <ModalPortal>
       <div
-        className="mac-modal-panel mac-glass-heavy border border-white/[0.1] rounded-2xl max-w-2xl w-full shadow-glass-lg overflow-hidden flex flex-col"
-        onClick={(e) => e.stopPropagation()}
+        className={MODAL_BACKDROP_CLASSES}
+        onClick={() => {
+          if (!loading) onClose();
+        }}
+        role="dialog"
+        aria-modal="true"
       >
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.08] bg-white/[0.02]">
+        <div
+          className="mac-modal-panel mac-glass-heavy border border-white/[0.1] rounded-2xl max-w-2xl w-full shadow-glass-lg overflow-hidden flex flex-col"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.08] bg-white/[0.02] shrink-0">
           <div className="flex items-center gap-2.5">
             <span className="w-8 h-8 rounded-xl bg-indigo-500/15 border border-indigo-400/30 flex items-center justify-center text-indigo-400">
               <Cloud className="w-4 h-4" />
@@ -299,7 +301,7 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
         </div>
 
         {/* Segmented Tab Navigation */}
-        <div className="px-6 py-3 border-b border-white/[0.07] bg-black/20">
+        <div className="px-6 py-3 border-b border-white/[0.07] bg-black/20 shrink-0">
           <div className="mac-pill-group gap-1">
             <button
               type="button"
@@ -353,7 +355,7 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
         </div>
 
         {/* Tab Content */}
-        <div className="p-6 space-y-6 overflow-y-auto max-h-[70vh]">
+        <div className="p-6 space-y-6 overflow-y-auto min-h-0 flex-1">
           {/* Status Alert */}
           {statusMsg && (
             <div
@@ -615,7 +617,7 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-3.5 bg-black/25 border-t border-white/[0.07] flex justify-end">
+        <div className="px-6 py-3.5 bg-black/25 border-t border-white/[0.07] flex justify-end shrink-0">
           <button
             type="button"
             onClick={onClose}
@@ -626,5 +628,6 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 };

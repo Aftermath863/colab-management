@@ -31,6 +31,7 @@ import {
   triggerHaptic,
 } from './macBridge';
 import { useToast } from './ToastContext';
+import { ModalPortal } from '../components/ModalPortal';
 
 interface CommandPaletteProps {
   isOpen: boolean;
@@ -442,17 +443,18 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   let flatIdx = -1;
 
   return (
-    <div
-      className="fixed inset-0 z-[90] mac-modal-backdrop flex items-start justify-center pt-[12vh] px-4"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label={isZh ? '命令面板' : 'Command Palette'}
-    >
+    <ModalPortal>
       <div
-        className="w-full max-w-2xl mac-modal-panel mac-glass-heavy rounded-2xl overflow-hidden shadow-glass-lg border border-white/[0.12]"
-        onClick={(e) => e.stopPropagation()}
+        className="fixed inset-0 z-[90] mac-modal-backdrop overflow-y-auto flex items-start justify-center pt-[max(3.75rem,13vh)] pb-10 px-4"
+        onClick={onClose}
+        role="dialog"
+        aria-modal="true"
+        aria-label={isZh ? '命令面板' : 'Command Palette'}
       >
+        <div
+          className="w-full max-w-2xl mac-modal-panel mac-palette-panel mac-glass-heavy rounded-2xl overflow-hidden shadow-glass-lg border border-white/[0.12] flex flex-col"
+          onClick={(e) => e.stopPropagation()}
+        >
         {/* Search Input Header */}
         <div className="flex items-center gap-3 px-4 py-3.5 border-b border-white/[0.08] bg-white/[0.02]">
           <Search className="w-4 h-4 text-blue-400 shrink-0" />
@@ -573,5 +575,6 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 };

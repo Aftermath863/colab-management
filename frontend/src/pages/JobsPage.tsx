@@ -17,6 +17,7 @@ import {
 import { Job, JobCreatePayload, Template } from '../types';
 import { api } from '../services/api';
 import { LocalizedText, TranslationKey, useI18n } from '../i18n';
+import { MODAL_BACKDROP_CLASSES, ModalPortal } from '../components/ModalPortal';
 import {
   ACCELERATOR_IDS,
   AcceleratorId,
@@ -288,7 +289,7 @@ export const JobsPage: React.FC = () => {
   };
 
   return (
-    <div className="mac-page-enter p-4 sm:p-8 max-w-7xl mx-auto space-y-6">
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto space-y-6">
       {/* Top Banner & Actions */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -506,14 +507,15 @@ export const JobsPage: React.FC = () => {
 
       {/* Submit Job Modal */}
       {isSubmitModalOpen && (
-        <div
-          className="mac-modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4"
-          onClick={() => setIsSubmitModalOpen(false)}
-        >
+        <ModalPortal>
           <div
-            className="mac-modal-panel mac-card w-full max-w-lg p-6 space-y-4 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
+            className={MODAL_BACKDROP_CLASSES}
+            onClick={() => setIsSubmitModalOpen(false)}
           >
+            <div
+              className="mac-modal-panel mac-card w-full max-w-lg p-6 space-y-4 shadow-2xl overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
             <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
                 <Plus className="w-5 h-5 text-indigo-400" />
@@ -733,18 +735,20 @@ export const JobsPage: React.FC = () => {
             </form>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {/* Cancel Job Confirmation Modal */}
       {cancelTarget && (
-        <div
-          className="mac-modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4"
-          onClick={() => setCancelTarget(null)}
-        >
+        <ModalPortal>
           <div
-            className="mac-modal-panel mac-card w-full max-w-md p-6 space-y-5 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
+            className={MODAL_BACKDROP_CLASSES}
+            onClick={() => setCancelTarget(null)}
           >
+            <div
+              className="mac-modal-panel mac-card w-full max-w-md p-6 space-y-5 shadow-2xl overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-400/30 text-rose-300">
@@ -783,18 +787,20 @@ export const JobsPage: React.FC = () => {
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {/* Live Streaming Job Log Viewer Modal */}
       {activeLogJob && (
-        <div
-          className="mac-modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4"
-          onClick={() => setActiveLogJob(null)}
-        >
+        <ModalPortal>
           <div
-            className="mac-modal-panel mac-card w-full max-w-4xl h-[80vh] flex flex-col shadow-2xl overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
+            className={MODAL_BACKDROP_CLASSES}
+            onClick={() => setActiveLogJob(null)}
           >
+            <div
+              className="mac-modal-panel mac-card w-full max-w-4xl h-[min(76vh,680px)] flex flex-col shadow-2xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
             {/* Header */}
             <div className="mac-glass-heavy h-14 border-b border-white/[0.08] flex items-center justify-between px-5 shrink-0">
               <div className="flex items-center gap-3 min-w-0">
@@ -852,6 +858,7 @@ export const JobsPage: React.FC = () => {
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
     </div>
   );

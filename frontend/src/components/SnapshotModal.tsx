@@ -16,6 +16,7 @@ import { Session, Snapshot, SnapshotTask } from '../types';
 import { useI18n } from '../i18n';
 import { openExternalUrl, triggerHaptic } from '../desktop/macBridge';
 import { useToast } from '../desktop/ToastContext';
+import { MODAL_BACKDROP_CLASSES, ModalPortal } from './ModalPortal';
 
 interface SnapshotModalProps {
   session: Session;
@@ -279,20 +280,21 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
   const isRunning = task?.status === 'RUNNING';
 
   return (
-    <div
-      className="fixed inset-0 z-50 mac-modal-backdrop flex items-center justify-center p-4"
-      onClick={() => {
-        if (!submitting) onClose();
-      }}
-      role="dialog"
-      aria-modal="true"
-    >
+    <ModalPortal>
       <div
-        className="w-full max-w-2xl mac-modal-panel mac-glass-heavy border border-white/[0.1] rounded-2xl shadow-glass-lg overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
+        className={MODAL_BACKDROP_CLASSES}
+        onClick={() => {
+          if (!submitting) onClose();
+        }}
+        role="dialog"
+        aria-modal="true"
       >
-        {/* Header */}
-        <div className="px-6 py-4 bg-white/[0.02] border-b border-white/[0.08] flex items-center justify-between">
+        <div
+          className="w-full max-w-2xl mac-modal-panel mac-glass-heavy border border-white/[0.1] rounded-2xl shadow-glass-lg overflow-hidden flex flex-col"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className="px-6 py-4 bg-white/[0.02] border-b border-white/[0.08] flex items-center justify-between shrink-0">
           <div className="flex items-center space-x-3">
             <div className="p-2 rounded-xl bg-indigo-500/15 border border-indigo-400/30 text-indigo-400">
               <Camera className="w-5 h-5" />
@@ -319,7 +321,7 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
         </div>
 
         {/* Segmented Tabs */}
-        <div className="px-6 py-3 border-b border-white/[0.07] bg-black/20">
+        <div className="px-6 py-3 border-b border-white/[0.07] bg-black/20 shrink-0">
           <div className="mac-pill-group gap-1">
             <button
               type="button"
@@ -354,7 +356,7 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
           </div>
         </div>
 
-        <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+        <div className="p-6 space-y-4 min-h-0 flex-1 overflow-y-auto">
           {/* Google Drive Authorization Banner */}
           {authRedirectUrl && (
             <div className="p-4 rounded-xl bg-amber-950/35 border border-amber-400/35 space-y-2.5">
@@ -626,5 +628,6 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 };

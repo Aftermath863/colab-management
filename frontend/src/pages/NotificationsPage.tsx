@@ -15,6 +15,7 @@ import {
 import { NotificationChannel } from '../types';
 import { api } from '../services/api';
 import { LocalizedText, useI18n } from '../i18n';
+import { MODAL_BACKDROP_CLASSES, ModalPortal } from '../components/ModalPortal';
 import {
   triggerHaptic,
   notifyToast,
@@ -240,7 +241,7 @@ export const NotificationsPage: React.FC = () => {
   };
 
   return (
-    <div className="mac-page-enter p-4 sm:p-8 max-w-7xl mx-auto space-y-6">
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -453,14 +454,15 @@ export const NotificationsPage: React.FC = () => {
 
       {/* Delete Confirmation Modal */}
       {deleteTarget && (
-        <div
-          className="mac-modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4"
-          onClick={() => setDeleteTarget(null)}
-        >
+        <ModalPortal>
           <div
-            className="mac-modal-panel mac-card w-full max-w-md p-6 space-y-5 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
+            className={MODAL_BACKDROP_CLASSES}
+            onClick={() => setDeleteTarget(null)}
           >
+            <div
+              className="mac-modal-panel mac-card w-full max-w-md p-6 space-y-5 shadow-2xl overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-400/30 text-rose-300">
@@ -503,18 +505,20 @@ export const NotificationsPage: React.FC = () => {
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
 
       {/* Add / Edit Channel Modal */}
       {isModalOpen && (
-        <div
-          className="mac-modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4"
-          onClick={() => setIsModalOpen(false)}
-        >
+        <ModalPortal>
           <div
-            className="mac-modal-panel mac-card w-full max-w-lg p-6 shadow-2xl space-y-4"
-            onClick={(e) => e.stopPropagation()}
+            className={MODAL_BACKDROP_CLASSES}
+            onClick={() => setIsModalOpen(false)}
           >
+            <div
+              className="mac-modal-panel mac-card w-full max-w-lg p-6 shadow-2xl space-y-4 overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
             <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
                 <Bell className="w-5 h-5 text-indigo-400" />
@@ -714,6 +718,7 @@ export const NotificationsPage: React.FC = () => {
             </form>
           </div>
         </div>
+        </ModalPortal>
       )}
     </div>
   );

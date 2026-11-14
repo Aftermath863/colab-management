@@ -12,6 +12,7 @@ import {
 } from '../utils/accelerators';
 import { triggerHaptic } from '../desktop/macBridge';
 import { useToast } from '../desktop/ToastContext';
+import { MODAL_BACKDROP_CLASSES, ModalPortal } from './ModalPortal';
 
 const SESSION_ACCELERATOR_KEY_MAP: Record<AcceleratorId, TranslationKey> = {
   CPU: 'newSession.accCPU',
@@ -137,18 +138,19 @@ export const NewSessionModal: React.FC<Props> = ({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 mac-modal-backdrop flex items-center justify-center p-4"
-      onClick={() => {
-        if (!loading) onClose();
-      }}
-      role="dialog"
-      aria-modal="true"
-    >
+    <ModalPortal>
       <div
-        className="w-full max-w-lg mac-modal-panel mac-glass-heavy rounded-2xl border border-white/[0.1] p-6 shadow-glass-lg"
-        onClick={(e) => e.stopPropagation()}
+        className={MODAL_BACKDROP_CLASSES}
+        onClick={() => {
+          if (!loading) onClose();
+        }}
+        role="dialog"
+        aria-modal="true"
       >
+        <div
+          className="w-full max-w-lg mac-modal-panel mac-glass-heavy rounded-2xl border border-white/[0.1] p-6 shadow-glass-lg overflow-y-auto"
+          onClick={(e) => e.stopPropagation()}
+        >
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-lg font-bold flex items-center gap-2.5 text-white">
             <span className="w-8 h-8 rounded-xl bg-blue-500/15 border border-blue-400/30 flex items-center justify-center text-blue-400">
@@ -385,5 +387,6 @@ export const NewSessionModal: React.FC<Props> = ({
         </form>
       </div>
     </div>
+    </ModalPortal>
   );
 };

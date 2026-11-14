@@ -14,6 +14,7 @@ import { Account } from '../types';
 import { api } from '../services/api';
 import { useI18n } from '../i18n';
 import { formatSyncTimestamp } from '../utils/time';
+import { MODAL_BACKDROP_CLASSES, ModalPortal } from '../components/ModalPortal';
 import {
   triggerHaptic,
   notifyToast,
@@ -120,7 +121,7 @@ export const AccountsPage: React.FC<Props> = ({
   };
 
   return (
-    <div className="mac-page-enter p-4 sm:p-8 max-w-7xl mx-auto space-y-6">
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-white tracking-tight">{t('accounts.title')}</h2>
@@ -341,14 +342,15 @@ export const AccountsPage: React.FC<Props> = ({
 
       {/* Delete Confirmation Glass Modal */}
       {deleteTarget && (
-        <div
-          className="mac-modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4"
-          onClick={() => setDeleteTarget(null)}
-        >
+        <ModalPortal>
           <div
-            className="mac-modal-panel mac-card w-full max-w-md p-6 space-y-5 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
+            className={MODAL_BACKDROP_CLASSES}
+            onClick={() => setDeleteTarget(null)}
           >
+            <div
+              className="mac-modal-panel mac-card w-full max-w-md p-6 space-y-5 shadow-2xl overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-400/30 text-rose-300">
@@ -393,6 +395,7 @@ export const AccountsPage: React.FC<Props> = ({
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
     </div>
   );
