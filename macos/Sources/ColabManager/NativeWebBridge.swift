@@ -305,9 +305,15 @@ final class NativeWebBridge: NSObject, WKScriptMessageHandler {
         guard let targetWindow = window ?? webView?.window else { return }
         switch action {
         case "startDrag":
+            let dragEvent: NSEvent?
             if let event = NSApp.currentEvent,
                event.type == .leftMouseDown || event.type == .leftMouseDragged {
-                targetWindow.performDrag(with: event)
+                dragEvent = event
+            } else {
+                dragEvent = (webView as? WorkbenchWebView)?.recentMouseDownEvent()
+            }
+            if let dragEvent {
+                targetWindow.performDrag(with: dragEvent)
             }
         case "zoom":
             targetWindow.performZoom(nil)

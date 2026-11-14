@@ -28,6 +28,45 @@ final class VibrancyBackgroundView: NSVisualEffectView {
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+}
+
+final class WorkbenchWebView: WKWebView {
+    private var lastMouseDown: (event: NSEvent, date: Date)?
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        lastMouseDown = (event, Date())
+        if window?.firstResponder !== self {
+            window?.makeFirstResponder(self)
+        }
+        super.mouseDown(with: event)
+    }
+
+    func recentMouseDownEvent(maxAge: TimeInterval = 0.5) -> NSEvent? {
+        guard let record = lastMouseDown,
+              Date().timeIntervalSince(record.date) <= maxAge else {
+            return nil
+        }
+        return record.event
+    }
+}
+
+final class SplashOverlayHostingView: NSHostingView<BootSplashView> {
+    var passthroughMouseEvents = false
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        if passthroughMouseEvents || isHidden || alphaValue <= 0.05 {
+            return nil
+        }
+        return super.hitTest(point)
+    }
 }
 
 struct BootSplashView: View {
@@ -288,10 +327,10 @@ struct BootSplashView: View {
 
 @MainActor
 final class WorkbenchContainerView: NSView, WKNavigationDelegate, WKUIDelegate {
-    let webView: WKWebView
+    let webView: WorkbenchWebView
     private let vibrancyView: VibrancyBackgroundView
     private let dragStripView: TitlebarDragStripView
-    private let splashHostingView: NSHostingView<BootSplashView>
+    private let splashHostingView: SplashOverlayHostingView
 
     private let daemonManager: BackendDaemonManager
     private let bridge: NativeWebBridge
@@ -302,6 +341,15 @@ final class WorkbenchContainerView: NSView, WKNavigationDelegate, WKUIDelegate {
     private var isWebLoading = false
     private var webLoadError: String? = nil
     private var isSplashDismissed = false
+    private var splashDismissalGeneration: UInt64 = 0
+
+    var isSplashOverlayDismissed: Bool {
+        isSplashDismissed
+    }
+
+    var isSplashInViewHierarchy: Bool {
+        splashHostingView.superview != nil
+    }
 
     init(
         frame: NSRect,
@@ -322,7 +370,7 @@ final class WorkbenchContainerView: NSView, WKNavigationDelegate, WKUIDelegate {
         let weakHandler = WeakScriptMessageHandler(target: bridge)
         config.userContentController.add(weakHandler, name: NativeWebBridge.handlerName)
 
-        self.webView = WKWebView(frame: frame, configuration: config)
+        self.webView = WorkbenchWebView(frame: frame, configuration: config)
         self.webView.setValue(false, forKey: "drawsBackground")
         self.webView.allowsBackForwardNavigationGestures = false
         self.webView.allowsMagnification = false
@@ -338,7 +386,8 @@ final class WorkbenchContainerView: NSView, WKNavigationDelegate, WKUIDelegate {
             onShowLogs: {},
             onRevealLogs: {}
         )
-        self.splashHostingView = NSHostingView(rootView: placeholderSplash)
+        self.splashHostingView = SplashOverlayHostingView(rootView: placeholderSplash)
+        self.splashHostingView.wantsLayer = true
 
         super.init(frame: frame)
 
@@ -357,6 +406,14 @@ final class WorkbenchContainerView: NSView, WKNavigationDelegate, WKUIDelegate {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         bridge.attach(webView: webView, window: window)
+        focusWebViewIfReady()
+    }
+
+    func focusWebViewIfReady() {
+        guard isSplashDismissed, let window else { return }
+        if window.firstResponder !== webView {
+            window.makeFirstResponder(webView)
+        }
     }
 
     func reloadWorkbench() {
@@ -399,11 +456,23 @@ final class WorkbenchContainerView: NSView, WKNavigationDelegate, WKUIDelegate {
             splashHostingView.topAnchor.constraint(equalTo: topAnchor),
             splashHostingView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-            // Thin 14pt top drag strip starting past traffic light buttons so web header controls stay clickable
+            // Thin 6pt top drag strip starting past traffic light buttons so web header controls remain 100% clickable
             dragStripView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 76),
             dragStripView.trailingAnchor.constraint(equalTo: trailingAnchor),
             dragStripView.topAnchor.constraint(equalTo: topAnchor),
-            dragStripView.heightAnchor.constraint(equalToConstant: 14)
+            dragStripView.heightAnchor.constraint(equalToConstant: 6)
+        ])
+    }
+
+    private func attachSplashHostingViewIfNeeded() {
+        guard splashHostingView.superview == nil else { return }
+        splashHostingView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(splashHostingView, positioned: .above, relativeTo: webView)
+        NSLayoutConstraint.activate([
+            splashHostingView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            splashHostingView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            splashHostingView.topAnchor.constraint(equalTo: topAnchor),
+            splashHostingView.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
     }
 
@@ -427,6 +496,8 @@ final class WorkbenchContainerView: NSView, WKNavigationDelegate, WKUIDelegate {
                 if healthy && !starting && !self.hasLoadedInitialURL {
                     self.hasLoadedInitialURL = true
                     self.loadWorkbenchURL()
+                } else if healthy && !starting && !self.isWebLoading && self.webLoadError == nil {
+                    self.dismissSplashOverlayIfReady()
                 }
             }
             .store(in: &cancellables)
@@ -506,7 +577,10 @@ final class WorkbenchContainerView: NSView, WKNavigationDelegate, WKUIDelegate {
     }
 
     private func showSplashOverlay() {
+        splashDismissalGeneration &+= 1
         isSplashDismissed = false
+        attachSplashHostingViewIfNeeded()
+        splashHostingView.passthroughMouseEvents = false
         splashHostingView.isHidden = false
         splashHostingView.alphaValue = 1.0
         updateSplashView()
@@ -516,17 +590,38 @@ final class WorkbenchContainerView: NSView, WKNavigationDelegate, WKUIDelegate {
         guard daemonManager.daemonHealthy, !isWebLoading, webLoadError == nil, !isSplashDismissed else {
             return
         }
+        splashDismissalGeneration &+= 1
+        let generation = splashDismissalGeneration
         isSplashDismissed = true
+        // Immediately stop intercepting mouse clicks so webView receives input even during fade-out
+        splashHostingView.passthroughMouseEvents = true
+        splashHostingView.wantsLayer = true
+        focusWebViewIfReady()
+
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.35
+            context.duration = 0.26
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             splashHostingView.animator().alphaValue = 0.0
         } completionHandler: { [weak self] in
             Task { @MainActor [weak self] in
-                guard let self, self.isSplashDismissed else { return }
-                self.splashHostingView.isHidden = true
+                self?.finalizeSplashDismissal(generation: generation)
             }
         }
+
+        // Fallback timer guarantees removal even if SwiftUI repeatForever animations keep CATransaction open
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) { [weak self] in
+            self?.finalizeSplashDismissal(generation: generation)
+        }
+    }
+
+    private func finalizeSplashDismissal(generation: UInt64) {
+        guard isSplashDismissed, splashDismissalGeneration == generation else { return }
+        splashHostingView.alphaValue = 0.0
+        splashHostingView.isHidden = true
+        if splashHostingView.superview != nil {
+            splashHostingView.removeFromSuperview()
+        }
+        focusWebViewIfReady()
     }
 
     // MARK: - WKNavigationDelegate
@@ -577,8 +672,11 @@ final class WorkbenchContainerView: NSView, WKNavigationDelegate, WKUIDelegate {
         isWebLoading = false
         webLoadError = nil
         bridge.markWebViewReady(true)
-        updateSplashView()
-        dismissSplashOverlayIfReady()
+        if daemonManager.daemonHealthy {
+            dismissSplashOverlayIfReady()
+        } else {
+            updateSplashView()
+        }
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {

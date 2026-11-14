@@ -1,10 +1,19 @@
 import AppKit
 import Foundation
 
+final class WorkbenchWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
 @MainActor
 final class MainWindowController: NSWindowController, NSWindowDelegate {
     private let containerView: WorkbenchContainerView
     private let bridge: NativeWebBridge
+
+    var workbenchContainerView: WorkbenchContainerView {
+        containerView
+    }
 
     init(
         daemonManager: BackendDaemonManager,
@@ -14,7 +23,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         self.bridge = bridge
 
         let initialRect = NSRect(x: 0, y: 0, width: 1320, height: 840)
-        let window = NSWindow(
+        let window = WorkbenchWindow(
             contentRect: initialRect,
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
@@ -25,8 +34,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.appearance = NSAppearance(named: .darkAqua)
-        window.backgroundColor = .clear
+        window.backgroundColor = NSColor(srgbRed: 0.027, green: 0.043, blue: 0.078, alpha: 0.12)
         window.isOpaque = false
+        window.ignoresMouseEvents = false
         window.isMovableByWindowBackground = false
         window.isReleasedWhenClosed = false
         window.collectionBehavior = [.fullScreenPrimary, .managed]
@@ -64,6 +74,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             window.makeKey()
         }
         NSApp.activate(ignoringOtherApps: true)
+        containerView.focusWebViewIfReady()
     }
 
     func reloadWorkbench() {
@@ -79,5 +90,6 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
     func windowDidBecomeKey(_ notification: Notification) {
         bridge.attach(webView: containerView.webView, window: window)
+        containerView.focusWebViewIfReady()
     }
 }

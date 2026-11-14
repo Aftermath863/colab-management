@@ -88,9 +88,11 @@ const AppContent: React.FC = () => {
     if (typeof window === 'undefined' || !isMacDesktop()) return;
 
     const handleMouseDown = (e: MouseEvent) => {
-      if (e.button !== 0 || e.defaultPrevented) return;
-      const target = e.target;
-      if (!(target instanceof Element)) return;
+      if (e.button !== 0 || e.detail >= 2 || e.defaultPrevented) return;
+      const rawTarget = e.target;
+      const target =
+        rawTarget instanceof Element ? rawTarget : (rawTarget as Node | null)?.parentElement ?? null;
+      if (!target) return;
       if (!target.closest('[data-mac-drag-region="true"]')) return;
       if (isInteractiveDragExcluded(target)) return;
       windowAction('startDrag');
@@ -98,8 +100,10 @@ const AppContent: React.FC = () => {
 
     const handleDoubleClick = (e: MouseEvent) => {
       if (e.defaultPrevented) return;
-      const target = e.target;
-      if (!(target instanceof Element)) return;
+      const rawTarget = e.target;
+      const target =
+        rawTarget instanceof Element ? rawTarget : (rawTarget as Node | null)?.parentElement ?? null;
+      if (!target) return;
       if (!target.closest('[data-mac-drag-region="true"]')) return;
       if (isInteractiveDragExcluded(target)) return;
       windowAction('zoom');

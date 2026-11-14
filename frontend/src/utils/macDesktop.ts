@@ -58,7 +58,7 @@ export function openInIDE(ide: IDEKind, port: number, remotePath: string = '/con
 }
 
 export function handleMacDragMouseDown(e: React.MouseEvent<HTMLElement>): void {
-  if (!isMacDesktop() || e.button !== 0) return;
+  if (!isMacDesktop() || e.button !== 0 || e.detail >= 2) return;
   if (isInteractiveDragExcluded(e.target)) return;
   windowAction('startDrag');
 }

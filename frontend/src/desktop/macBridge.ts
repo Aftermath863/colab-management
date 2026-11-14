@@ -54,6 +54,7 @@ declare global {
 }
 
 let lastDragTimestamp = 0;
+let lastZoomTimestamp = 0;
 
 function hasWindow(): boolean {
   return typeof window !== 'undefined';
@@ -162,6 +163,12 @@ export function windowAction(action: WindowActionKind): boolean {
       return false;
     }
     lastDragTimestamp = now;
+  } else if (action === 'zoom') {
+    const now = Date.now();
+    if (now - lastZoomTimestamp < 250) {
+      return false;
+    }
+    lastZoomTimestamp = now;
   }
   return postNativeMessage({ type: 'windowAction', action });
 }
