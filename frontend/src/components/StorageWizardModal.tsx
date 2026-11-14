@@ -3,6 +3,8 @@ import { Cloud, HardDrive, Database, CheckCircle2, AlertCircle, X, ExternalLink,
 import { api } from '../services/api';
 import { StorageProfile } from '../types';
 import { LocalizedText, useI18n } from '../i18n';
+import { openExternalUrl, triggerHaptic } from '../desktop/macBridge';
+import { useToast } from '../desktop/ToastContext';
 
 interface StorageWizardModalProps {
   sessionId: string;
@@ -18,6 +20,8 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
   onStorageMounted,
 }) => {
   const { t, tm } = useI18n();
+  const toast = useToast();
+
   const [activeTab, setActiveTab] = useState<'gdrive' | 's3' | 'hf'>('gdrive');
   const [profiles, setProfiles] = useState<StorageProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string>('');
@@ -54,6 +58,17 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen || typeof window === 'undefined') return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !loading) {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [isOpen, loading, onClose]);
+
   const loadProfiles = async () => {
     try {
       const data = await api.getStorageProfiles();
@@ -64,10 +79,14 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
   };
 
   const openConsentPopup = (url: string) => {
-    if (typeof window === 'undefined' || typeof window.open !== 'function') return;
-    const popup = window.open(url, 'colab_gdrive_consent', 'width=580,height=700,noopener=no');
+    if (typeof window === 'undefined') return;
+    const popup = typeof window.open === 'function'
+      ? window.open(url, 'colab_gdrive_consent', 'width=580,height=700,noopener=no')
+      : null;
     if (popup) {
       popupRef.current = popup;
+    } else {
+      openExternalUrl(url);
     }
   };
 
@@ -97,10 +116,15 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
             type: 'success',
             msg: { key: 'storageModal.gdriveSuccess' },
           });
+          toast.pushToast({
+            variant: 'success',
+            title: t('storageModal.gdriveSuccess'),
+          });
           if (onStorageMounted) onStorageMounted();
         }
       } catch (err: any) {
         popupRef.current = null;
+        triggerHaptic('medium');
         setStatusMsg({
           type: 'error',
           msg: err.message ? { raw: err.message } : { key: 'storageModal.gdriveFailed' },
@@ -109,7 +133,7 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
         setLoading(false);
       }
     },
-    [sessionId, onStorageMounted]
+    [sessionId, onStorageMounted, t, toast]
   );
 
   // Automatically finalize credential propagation once the user closes the Google consent popup
@@ -136,6 +160,10 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
           type: 'success',
           msg: { key: 'storageModal.mountVerified', params: { path: res.mount_path } },
         });
+        toast.pushToast({
+          variant: 'success',
+          title: t('storageModal.mountVerified', { path: res.mount_path }),
+        });
         if (onStorageMounted) onStorageMounted();
       } else {
         setStatusMsg({
@@ -144,6 +172,7 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
         });
       }
     } catch (err: any) {
+      triggerHaptic('medium');
       setStatusMsg({
         type: 'error',
         msg: err.message ? { raw: err.message } : { key: 'storageModal.mountFailed' },
@@ -177,9 +206,14 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
         type: 'success',
         msg: { key: 'storageModal.s3Success', params: { name: profile.name, path: profile.mount_path } },
       });
+      toast.pushToast({
+        variant: 'success',
+        title: t('storageModal.s3Success', { name: profile.name, path: profile.mount_path }),
+      });
       loadProfiles();
       if (onStorageMounted) onStorageMounted();
     } catch (err: any) {
+      triggerHaptic('medium');
       setStatusMsg({
         type: 'error',
         msg: err.message ? { raw: err.message } : { key: 'storageModal.s3Failed' },
@@ -210,9 +244,14 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
         type: 'success',
         msg: { key: 'storageModal.hfSuccess', params: { path: profile.mount_path } },
       });
+      toast.pushToast({
+        variant: 'success',
+        title: t('storageModal.hfSuccess', { path: profile.mount_path }),
+      });
       loadProfiles();
       if (onStorageMounted) onStorageMounted();
     } catch (err: any) {
+      triggerHaptic('medium');
       setStatusMsg({
         type: 'error',
         msg: err.message ? { raw: err.message } : { key: 'storageModal.hfFailed' },
@@ -225,71 +264,92 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div className="bg-slate-900 border border-slate-800 rounded-xl max-w-2xl w-full shadow-2xl overflow-hidden flex flex-col">
+    <div
+      className="fixed inset-0 z-50 mac-modal-backdrop flex items-center justify-center p-4"
+      onClick={() => {
+        if (!loading) onClose();
+      }}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        className="mac-modal-panel mac-glass-heavy border border-white/[0.1] rounded-2xl max-w-2xl w-full shadow-glass-lg overflow-hidden flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
-          <div className="flex items-center gap-2">
-            <Cloud className="w-5 h-5 text-indigo-400" />
-            <h2 className="text-lg font-semibold text-white">{t('storageModal.title')}</h2>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.08] bg-white/[0.02]">
+          <div className="flex items-center gap-2.5">
+            <span className="w-8 h-8 rounded-xl bg-indigo-500/15 border border-indigo-400/30 flex items-center justify-center text-indigo-400">
+              <Cloud className="w-4 h-4" />
+            </span>
+            <h2 className="text-base sm:text-lg font-semibold text-white">{t('storageModal.title')}</h2>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            title={t('common.close')}
-            className="text-slate-400 hover:text-white transition-colors p-1 rounded-lg hover:bg-slate-800"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <kbd className="mac-kbd hidden sm:inline-flex">Esc</kbd>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={loading}
+              title={t('common.close')}
+              className="text-slate-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/[0.08]"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
-        {/* Tab Navigation */}
-        <div className="flex border-b border-slate-800 px-6 bg-slate-950/40">
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('gdrive');
-              setStatusMsg(null);
-            }}
-            className={`py-3 px-4 text-xs font-medium border-b-2 transition-colors flex items-center gap-2 ${
-              activeTab === 'gdrive'
-                ? 'border-indigo-500 text-indigo-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <HardDrive className="w-4 h-4" />
-            {t('storageModal.tabGdrive')}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('s3');
-              setStatusMsg(null);
-            }}
-            className={`py-3 px-4 text-xs font-medium border-b-2 transition-colors flex items-center gap-2 ${
-              activeTab === 's3'
-                ? 'border-indigo-500 text-indigo-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Database className="w-4 h-4" />
-            {t('storageModal.tabS3')}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('hf');
-              setStatusMsg(null);
-            }}
-            className={`py-3 px-4 text-xs font-medium border-b-2 transition-colors flex items-center gap-2 ${
-              activeTab === 'hf'
-                ? 'border-indigo-500 text-indigo-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Cloud className="w-4 h-4 text-amber-400" />
-            {t('storageModal.tabHf')}
-          </button>
+        {/* Segmented Tab Navigation */}
+        <div className="px-6 py-3 border-b border-white/[0.07] bg-black/20">
+          <div className="mac-pill-group gap-1">
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic('light');
+                setActiveTab('gdrive');
+                setStatusMsg(null);
+              }}
+              className={`py-1.5 px-3.5 rounded-lg text-xs font-medium transition-all flex items-center gap-2 ${
+                activeTab === 'gdrive'
+                  ? 'mac-pill-active text-white'
+                  : 'text-slate-400 hover:text-slate-200 border border-transparent'
+              }`}
+            >
+              <HardDrive className="w-3.5 h-3.5" />
+              {t('storageModal.tabGdrive')}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic('light');
+                setActiveTab('s3');
+                setStatusMsg(null);
+              }}
+              className={`py-1.5 px-3.5 rounded-lg text-xs font-medium transition-all flex items-center gap-2 ${
+                activeTab === 's3'
+                  ? 'mac-pill-active text-white'
+                  : 'text-slate-400 hover:text-slate-200 border border-transparent'
+              }`}
+            >
+              <Database className="w-3.5 h-3.5" />
+              {t('storageModal.tabS3')}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic('light');
+                setActiveTab('hf');
+                setStatusMsg(null);
+              }}
+              className={`py-1.5 px-3.5 rounded-lg text-xs font-medium transition-all flex items-center gap-2 ${
+                activeTab === 'hf'
+                  ? 'mac-pill-active text-white'
+                  : 'text-slate-400 hover:text-slate-200 border border-transparent'
+              }`}
+            >
+              <Cloud className="w-3.5 h-3.5 text-amber-400" />
+              {t('storageModal.tabHf')}
+            </button>
+          </div>
         </div>
 
         {/* Tab Content */}
@@ -297,12 +357,12 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
           {/* Status Alert */}
           {statusMsg && (
             <div
-              className={`p-4 rounded-lg text-sm flex items-start gap-3 ${
+              className={`p-4 rounded-xl text-sm flex items-start gap-3 ${
                 statusMsg.type === 'success'
-                  ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+                  ? 'bg-emerald-500/10 border border-emerald-400/25 text-emerald-300'
                   : statusMsg.type === 'error'
-                  ? 'bg-rose-500/10 border border-rose-500/20 text-rose-400'
-                  : 'bg-indigo-500/10 border border-indigo-500/20 text-indigo-300'
+                    ? 'bg-rose-500/10 border border-rose-400/25 text-rose-300'
+                    : 'bg-indigo-500/10 border border-indigo-400/25 text-indigo-200'
               }`}
             >
               {statusMsg.type === 'success' ? (
@@ -321,7 +381,7 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
                     <button
                       type="button"
                       onClick={() => openConsentPopup(statusMsg.link!)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-xs font-medium transition-colors"
+                      className="mac-btn-primary px-3 py-1.5 rounded-lg text-xs font-medium gap-1.5"
                     >
                       {t('storageModal.grantConsent')} <ExternalLink className="w-3.5 h-3.5" />
                     </button>
@@ -329,7 +389,7 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
                       type="button"
                       disabled={loading}
                       onClick={() => void handleGDrivePropagate(false, true)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded text-xs font-medium transition-colors"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 active:scale-[0.97] disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-all"
                     >
                       <CheckCircle2 className="w-3.5 h-3.5" /> {t('storageModal.confirmConsentAndMount')}
                     </button>
@@ -342,7 +402,7 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
           {/* Tab 1: Google Drive */}
           {activeTab === 'gdrive' && (
             <div className="space-y-4">
-              <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-lg text-xs text-slate-300 space-y-2">
+              <div className="p-4 bg-white/[0.03] border border-white/[0.08] rounded-xl text-xs text-slate-300 space-y-2">
                 <strong className="text-white block font-medium">{t('storageModal.gdriveInfoTitle')}</strong>
                 <p>
                   {t('storageModal.gdriveInfoDesc1Prefix')}
@@ -356,7 +416,7 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
                   type="button"
                   onClick={() => handleGDrivePropagate(false)}
                   disabled={loading}
-                  className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 shadow-sm"
+                  className="w-full mac-btn-primary py-2.5 px-4 disabled:opacity-50 rounded-xl text-sm font-semibold gap-2"
                 >
                   {loading && <RefreshCw className="w-4 h-4 animate-spin" />}
                   {t('storageModal.gdriveMountBtn')}
@@ -369,7 +429,7 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
           {activeTab === 's3' && (
             <div className="space-y-4">
               {profiles.filter((p) => p.type === 's3').length > 0 && (
-                <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-lg space-y-2">
+                <div className="p-3.5 bg-white/[0.03] border border-white/[0.08] rounded-xl space-y-2">
                   <label className="block text-xs font-medium text-slate-400">
                     {t('storageModal.selectExistingS3')}
                   </label>
@@ -377,13 +437,15 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
                     <select
                       value={selectedProfileId}
                       onChange={(e) => setSelectedProfileId(e.target.value)}
-                      className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white"
+                      className="flex-1 mac-input rounded-xl px-3 py-2 text-xs"
                     >
-                      <option value="">{t('storageModal.chooseProfile')}</option>
+                      <option value="" className="bg-slate-900 text-white">
+                        {t('storageModal.chooseProfile')}
+                      </option>
                       {profiles
                         .filter((p) => p.type === 's3')
                         .map((p) => (
-                          <option key={p.id} value={p.id}>
+                          <option key={p.id} value={p.id} className="bg-slate-900 text-white">
                             {p.name} ({p.mount_path})
                           </option>
                         ))}
@@ -392,7 +454,7 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
                       type="button"
                       onClick={handleMountExistingProfile}
                       disabled={loading || !selectedProfileId}
-                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors"
+                      className="mac-btn-primary px-4 py-2 disabled:opacity-50 text-xs font-medium rounded-xl"
                     >
                       {t('storageModal.mountProfileBtn')}
                     </button>
@@ -400,7 +462,7 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
                 </div>
               )}
 
-              <div className="border-t border-slate-800 pt-4 space-y-3">
+              <div className="border-t border-white/[0.07] pt-4 space-y-3">
                 <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
                   {t('storageModal.createNewS3Heading')}
                 </h4>
@@ -412,7 +474,7 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
                       placeholder={t('storageModal.s3NamePlaceholder')}
                       value={s3Name}
                       onChange={(e) => setS3Name(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
+                      className="w-full mac-input rounded-xl px-3 py-2 text-xs"
                     />
                   </div>
                   <div>
@@ -420,11 +482,17 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
                     <select
                       value={s3Provider}
                       onChange={(e) => setS3Provider(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
+                      className="w-full mac-input rounded-xl px-3 py-2 text-xs"
                     >
-                      <option value="AWS">{t('storageModal.providerAws')}</option>
-                      <option value="Cloudflare">{t('storageModal.providerCloudflare')}</option>
-                      <option value="MinIO">{t('storageModal.providerMinio')}</option>
+                      <option value="AWS" className="bg-slate-900 text-white">
+                        {t('storageModal.providerAws')}
+                      </option>
+                      <option value="Cloudflare" className="bg-slate-900 text-white">
+                        {t('storageModal.providerCloudflare')}
+                      </option>
+                      <option value="MinIO" className="bg-slate-900 text-white">
+                        {t('storageModal.providerMinio')}
+                      </option>
                     </select>
                   </div>
                 </div>
@@ -436,7 +504,7 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
                     placeholder="https://<accountid>.r2.cloudflarestorage.com"
                     value={s3Endpoint}
                     onChange={(e) => setS3Endpoint(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
+                    className="w-full mac-input rounded-xl px-3 py-2 text-xs"
                   />
                 </div>
 
@@ -448,7 +516,7 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
                       placeholder="AKIA..."
                       value={s3AccessKey}
                       onChange={(e) => setS3AccessKey(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
+                      className="w-full mac-input rounded-xl px-3 py-2 text-xs"
                     />
                   </div>
                   <div>
@@ -458,7 +526,7 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
                       placeholder="••••••••••••"
                       value={s3SecretKey}
                       onChange={(e) => setS3SecretKey(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
+                      className="w-full mac-input rounded-xl px-3 py-2 text-xs"
                     />
                   </div>
                 </div>
@@ -470,7 +538,7 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
                     placeholder="/content/data"
                     value={s3MountPath}
                     onChange={(e) => setS3MountPath(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
+                    className="w-full mac-input rounded-xl px-3 py-2 text-xs"
                   />
                 </div>
 
@@ -479,7 +547,7 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
                     type="button"
                     onClick={handleCreateAndMountS3}
                     disabled={loading}
-                    className="w-full py-2 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-colors"
+                    className="w-full mac-btn-primary py-2.5 px-4 disabled:opacity-50 rounded-xl text-xs font-semibold"
                   >
                     {t('storageModal.saveAndMountS3')}
                   </button>
@@ -491,7 +559,7 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
           {/* Tab 3: Hugging Face */}
           {activeTab === 'hf' && (
             <div className="space-y-4">
-              <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-lg text-xs text-slate-300 space-y-2">
+              <div className="p-4 bg-white/[0.03] border border-white/[0.08] rounded-xl text-xs text-slate-300 space-y-2">
                 <strong className="text-white block font-medium">{t('storageModal.hfInfoTitle')}</strong>
                 <p>
                   {t('storageModal.hfInfoDescPrefix')}
@@ -508,7 +576,7 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
                     placeholder={t('storageModal.hfNamePlaceholder')}
                     value={hfName}
                     onChange={(e) => setHfName(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
+                    className="w-full mac-input rounded-xl px-3 py-2 text-xs"
                   />
                 </div>
                 <div>
@@ -518,7 +586,7 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
                     placeholder="hf_••••••••••••••••••••••••"
                     value={hfToken}
                     onChange={(e) => setHfToken(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
+                    className="w-full mac-input rounded-xl px-3 py-2 text-xs"
                   />
                 </div>
                 <div>
@@ -527,7 +595,7 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
                     type="text"
                     value={hfMountPath}
                     onChange={(e) => setHfMountPath(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
+                    className="w-full mac-input rounded-xl px-3 py-2 text-xs"
                   />
                 </div>
 
@@ -536,7 +604,7 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
                     type="button"
                     onClick={handleCreateAndMountHF}
                     disabled={loading}
-                    className="w-full py-2.5 px-4 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-colors"
+                    className="w-full py-2.5 px-4 bg-gradient-to-b from-amber-500 to-amber-600 hover:brightness-110 active:scale-[0.97] border border-amber-300/30 shadow-[0_6px_20px_-6px_rgba(245,158,11,0.5),inset_0_1px_0_rgba(255,255,255,0.22)] disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-all"
                   >
                     {t('storageModal.hfAuthorizeBtn')}
                   </button>
@@ -547,11 +615,11 @@ export const StorageWizardModal: React.FC<StorageWizardModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-3 bg-slate-950/60 border-t border-slate-800 flex justify-end">
+        <div className="px-6 py-3.5 bg-black/25 border-t border-white/[0.07] flex justify-end">
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm font-medium transition-colors"
+            className="mac-btn-secondary px-4 py-2 rounded-xl text-xs font-medium"
           >
             {t('common.close')}
           </button>

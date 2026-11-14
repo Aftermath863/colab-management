@@ -14,6 +14,8 @@ import {
 import { api } from '../services/api';
 import { Session, Snapshot, SnapshotTask } from '../types';
 import { useI18n } from '../i18n';
+import { openExternalUrl, triggerHaptic } from '../desktop/macBridge';
+import { useToast } from '../desktop/ToastContext';
 
 interface SnapshotModalProps {
   session: Session;
@@ -47,6 +49,8 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
   onCompleted,
 }) => {
   const { t } = useI18n();
+  const toast = useToast();
+
   const [activeTab, setActiveTab] = useState<'save' | 'restore'>(initialTab);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [loadingList, setLoadingList] = useState(true);
@@ -77,6 +81,17 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
   const completionNotifiedRef = useRef<string | null>(null);
 
   const readySnapshots = snapshots.filter((s) => s.status === 'READY');
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !submitting) {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [submitting, onClose]);
 
   const loadSnapshots = useCallback(async () => {
     setLoadingList(true);
@@ -111,6 +126,11 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
           const doneKey = `${current.task_id || ''}:${current.status}`;
           if (completionNotifiedRef.current !== doneKey) {
             completionNotifiedRef.current = doneKey;
+            toast.pushToast({
+              variant: 'success',
+              title: t('snapshots.taskCompleted'),
+              description: current.message || session.name,
+            });
             onCompleted?.(current);
           }
         } else if (current.status === 'FAILED') {
@@ -118,12 +138,17 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
             clearInterval(taskPollRef.current);
             taskPollRef.current = null;
           }
+          toast.pushToast({
+            variant: 'error',
+            title: t('snapshots.taskFailed'),
+            description: current.error_message || current.message,
+          });
         }
       }
     } catch {
       // Ignore transient poll glitches
     }
-  }, [session.id, loadSnapshots, onCompleted]);
+  }, [session.id, session.name, loadSnapshots, onCompleted, t, toast]);
 
   const startTaskPolling = useCallback(() => {
     if (taskPollRef.current) clearInterval(taskPollRef.current);
@@ -143,6 +168,7 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
     setError(null);
     setAuthRedirectUrl(null);
     setSubmitting(true);
+    triggerHaptic('light');
     try {
       const targetOverwrite = saveMode === 'overwrite' ? overwriteId : undefined;
       const chosenSnap = targetOverwrite ? readySnapshots.find((s) => s.id === targetOverwrite) : undefined;
@@ -164,6 +190,7 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
         startTaskPolling();
       }
     } catch (err: any) {
+      triggerHaptic('medium');
       setError(err.message || 'Snapshot save failed');
     } finally {
       setSubmitting(false);
@@ -188,6 +215,7 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
       setError(null);
       setAuthRedirectUrl(null);
       setSubmitting(true);
+      triggerHaptic('light');
       try {
         const res = await api.restoreSessionSnapshot(session.id, targetId);
         if (res.action_status === 'AUTH_REQUIRED' && res.redirect_url) {
@@ -200,6 +228,7 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
           startTaskPolling();
         }
       } catch (err: any) {
+        triggerHaptic('medium');
         setError(err.message || 'Snapshot restore failed');
       } finally {
         setSubmitting(false);
@@ -220,7 +249,13 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
   const handleOpenAuthPopup = () => {
     if (!authRedirectUrl || typeof window === 'undefined') return;
     setWaitingAuth(true);
-    popupRef.current = window.open(authRedirectUrl, 'colab-gdrive-snapshot-auth', 'width=600,height=720');
+    const popup = window.open(authRedirectUrl, 'colab-gdrive-snapshot-auth', 'width=600,height=720');
+    if (!popup) {
+      openExternalUrl(authRedirectUrl);
+      setWaitingAuth(false);
+      return;
+    }
+    popupRef.current = popup;
     if (authPollRef.current) clearInterval(authPollRef.current);
     authPollRef.current = setInterval(async () => {
       if (popupRef.current && popupRef.current.closed) {
@@ -244,12 +279,22 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
   const isRunning = task?.status === 'RUNNING';
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="w-full max-w-2xl bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden">
+    <div
+      className="fixed inset-0 z-50 mac-modal-backdrop flex items-center justify-center p-4"
+      onClick={() => {
+        if (!submitting) onClose();
+      }}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        className="w-full max-w-2xl mac-modal-panel mac-glass-heavy border border-white/[0.1] rounded-2xl shadow-glass-lg overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
-        <div className="px-6 py-4 bg-slate-950/70 border-b border-slate-800 flex items-center justify-between">
+        <div className="px-6 py-4 bg-white/[0.02] border-b border-white/[0.08] flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <div className="p-2 rounded-lg bg-indigo-500/15 border border-indigo-500/30 text-indigo-400">
+            <div className="p-2 rounded-xl bg-indigo-500/15 border border-indigo-400/30 text-indigo-400">
               <Camera className="w-5 h-5" />
             </div>
             <div>
@@ -259,47 +304,60 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-            title={t('common.close')}
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <kbd className="mac-kbd hidden sm:inline-flex">Esc</kbd>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={submitting}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/[0.08] transition-colors"
+              title={t('common.close')}
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
-        {/* Tabs */}
-        <div className="px-6 pt-3 border-b border-slate-800 flex space-x-2">
-          <button
-            type="button"
-            onClick={() => setActiveTab('save')}
-            className={`px-4 py-2 text-xs font-semibold border-b-2 flex items-center space-x-1.5 transition-colors ${
-              activeTab === 'save'
-                ? 'border-indigo-400 text-indigo-300'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <UploadCloud className="w-4 h-4" />
-            <span>{t('snapshots.saveTab')}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('restore')}
-            className={`px-4 py-2 text-xs font-semibold border-b-2 flex items-center space-x-1.5 transition-colors ${
-              activeTab === 'restore'
-                ? 'border-indigo-400 text-indigo-300'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <DownloadCloud className="w-4 h-4" />
-            <span>{t('snapshots.restoreTab')}</span>
-          </button>
+        {/* Segmented Tabs */}
+        <div className="px-6 py-3 border-b border-white/[0.07] bg-black/20">
+          <div className="mac-pill-group gap-1">
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic('light');
+                setActiveTab('save');
+              }}
+              className={`px-4 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition-all ${
+                activeTab === 'save'
+                  ? 'mac-pill-active text-white'
+                  : 'text-slate-400 hover:text-slate-200 border border-transparent'
+              }`}
+            >
+              <UploadCloud className="w-3.5 h-3.5" />
+              <span>{t('snapshots.saveTab')}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic('light');
+                setActiveTab('restore');
+              }}
+              className={`px-4 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition-all ${
+                activeTab === 'restore'
+                  ? 'mac-pill-active text-white'
+                  : 'text-slate-400 hover:text-slate-200 border border-transparent'
+              }`}
+            >
+              <DownloadCloud className="w-3.5 h-3.5" />
+              <span>{t('snapshots.restoreTab')}</span>
+            </button>
+          </div>
         </div>
 
         <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
           {/* Google Drive Authorization Banner */}
           {authRedirectUrl && (
-            <div className="p-4 rounded-xl bg-amber-950/35 border border-amber-500/40 space-y-2.5">
+            <div className="p-4 rounded-xl bg-amber-950/35 border border-amber-400/35 space-y-2.5">
               <div className="flex items-start space-x-2.5">
                 <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
                 <div>
@@ -311,7 +369,7 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
                 type="button"
                 onClick={handleOpenAuthPopup}
                 disabled={waitingAuth}
-                className="px-3.5 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold flex items-center space-x-2 transition-colors disabled:opacity-60"
+                className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 active:scale-[0.97] text-white text-xs font-semibold flex items-center space-x-2 transition-all disabled:opacity-60"
               >
                 {waitingAuth ? <Loader2 className="w-4 h-4 animate-spin" /> : <ExternalLink className="w-4 h-4" />}
                 <span>{waitingAuth ? t('snapshots.waitingAuthPopup') : t('snapshots.openAuthPopup')}</span>
@@ -321,7 +379,7 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
 
           {/* Error Banner */}
           {error && (
-            <div className="p-3 rounded-lg bg-rose-950/50 border border-rose-500/40 text-xs text-rose-200">
+            <div className="p-3 rounded-xl bg-rose-950/50 border border-rose-500/35 text-xs text-rose-200">
               {error}
             </div>
           )}
@@ -331,10 +389,10 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
             <div
               className={`p-3.5 rounded-xl border text-xs space-y-2 ${
                 task.status === 'COMPLETED'
-                  ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-200'
+                  ? 'bg-emerald-950/30 border-emerald-400/35 text-emerald-200'
                   : task.status === 'FAILED'
-                    ? 'bg-rose-950/30 border-rose-500/40 text-rose-200'
-                    : 'bg-indigo-950/30 border-indigo-500/40 text-indigo-200'
+                    ? 'bg-rose-950/30 border-rose-400/35 text-rose-200'
+                    : 'bg-indigo-950/30 border-indigo-400/35 text-indigo-200'
               }`}
             >
               <div className="flex items-center justify-between font-semibold">
@@ -349,9 +407,9 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
                         : t('snapshots.taskFailed')}
                   </span>
                 </span>
-                <span className="font-mono">{task.progress_pct ?? 0}%</span>
+                <span className="font-mono tabular-nums">{task.progress_pct ?? 0}%</span>
               </div>
-              <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+              <div className="w-full h-1.5 rounded-full bg-white/[0.08] overflow-hidden">
                 <div
                   className={`h-full transition-all duration-300 ${
                     task.status === 'FAILED'
@@ -374,26 +432,32 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
                 <label className="block text-xs font-medium text-slate-300 mb-1.5">
                   {t('snapshots.saveTargetLabel')}
                 </label>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="mac-pill-group w-full grid grid-cols-2 gap-1">
                   <button
                     type="button"
-                    onClick={() => setSaveMode('new')}
-                    className={`px-3 py-2 rounded-lg border text-xs font-semibold transition-colors ${
+                    onClick={() => {
+                      triggerHaptic('light');
+                      setSaveMode('new');
+                    }}
+                    className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
                       saveMode === 'new'
-                        ? 'bg-indigo-600/20 border-indigo-500 text-indigo-200'
-                        : 'bg-slate-800/60 border-slate-700 text-slate-400 hover:text-slate-200'
+                        ? 'mac-pill-active text-white'
+                        : 'text-slate-400 hover:text-slate-200 border border-transparent'
                     }`}
                   >
                     {t('snapshots.saveAsNew')}
                   </button>
                   <button
                     type="button"
-                    onClick={() => setSaveMode('overwrite')}
+                    onClick={() => {
+                      triggerHaptic('light');
+                      setSaveMode('overwrite');
+                    }}
                     disabled={readySnapshots.length === 0}
-                    className={`px-3 py-2 rounded-lg border text-xs font-semibold transition-colors disabled:opacity-40 ${
+                    className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 ${
                       saveMode === 'overwrite'
-                        ? 'bg-indigo-600/20 border-indigo-500 text-indigo-200'
-                        : 'bg-slate-800/60 border-slate-700 text-slate-400 hover:text-slate-200'
+                        ? 'mac-pill-active text-white'
+                        : 'text-slate-400 hover:text-slate-200 border border-transparent'
                     }`}
                   >
                     {t('snapshots.overwriteExisting')}
@@ -403,7 +467,7 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
 
               {saveMode === 'overwrite' ? (
                 <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">
+                  <label className="block text-xs font-medium text-slate-300 mb-1.5">
                     {t('snapshots.selectOverwriteLabel')}
                   </label>
                   {readySnapshots.length === 0 ? (
@@ -412,10 +476,10 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
                     <select
                       value={overwriteId}
                       onChange={(e) => setOverwriteId(e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm text-white focus:border-indigo-500 focus:outline-none"
+                      className="w-full px-3 py-2 rounded-xl mac-input text-sm"
                     >
                       {readySnapshots.map((s) => (
-                        <option key={s.id} value={s.id}>
+                        <option key={s.id} value={s.id} className="bg-slate-900 text-white">
                           {s.name} ({formatBytes(s.workspace_size_bytes)})
                         </option>
                       ))}
@@ -425,7 +489,7 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
               ) : (
                 <>
                   <div>
-                    <label className="block text-xs font-medium text-slate-300 mb-1">
+                    <label className="block text-xs font-medium text-slate-300 mb-1.5">
                       {t('snapshots.nameLabel')}
                     </label>
                     <input
@@ -433,11 +497,11 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       placeholder={t('snapshots.namePlaceholder')}
-                      className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
+                      className="w-full px-3 py-2 rounded-xl mac-input text-sm placeholder-slate-500"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-slate-300 mb-1">
+                    <label className="block text-xs font-medium text-slate-300 mb-1.5">
                       {t('snapshots.descLabel')}
                     </label>
                     <input
@@ -445,20 +509,20 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
                       value={description}
                       onChange={(e) => setDescription(e.target.value)}
                       placeholder={t('snapshots.descPlaceholder')}
-                      className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
+                      className="w-full px-3 py-2 rounded-xl mac-input text-sm placeholder-slate-500"
                     />
                   </div>
                 </>
               )}
 
               {/* Full Binary Option */}
-              <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
+              <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/[0.08] space-y-2">
                 <label className="flex items-start space-x-2.5 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={includeBinary}
                     onChange={(e) => setIncludeBinary(e.target.checked)}
-                    className="mt-0.5 rounded bg-slate-800 border-slate-600 text-indigo-600 focus:ring-indigo-500"
+                    className="mt-0.5 rounded bg-slate-900 border-white/20 text-indigo-500 focus:ring-indigo-500"
                   />
                   <div>
                     <div className="text-xs font-semibold text-slate-200">{t('snapshots.fullBinaryCheckbox')}</div>
@@ -475,16 +539,16 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
                   type="checkbox"
                   checked={stopAfterSave}
                   onChange={(e) => setStopAfterSave(e.target.checked)}
-                  className="rounded bg-slate-800 border-slate-600 text-indigo-600 focus:ring-indigo-500"
+                  className="rounded bg-slate-900 border-white/20 text-indigo-500 focus:ring-indigo-500"
                 />
                 <span className="text-xs text-slate-300">{t('snapshots.stopAfterSaveCheckbox')}</span>
               </label>
 
-              <div className="pt-2 flex items-center justify-end space-x-3 border-t border-slate-800">
+              <div className="pt-3 flex items-center justify-end space-x-3 border-t border-white/[0.07]">
                 <button
                   type="button"
                   onClick={onClose}
-                  className="px-4 py-2 rounded-lg text-xs text-slate-300 hover:bg-slate-800"
+                  className="mac-btn-secondary px-4 py-2 rounded-xl text-xs font-medium"
                 >
                   {t('common.close')}
                 </button>
@@ -492,7 +556,7 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
                   type="button"
                   onClick={handleSave}
                   disabled={submitting || isRunning || (saveMode === 'overwrite' && !overwriteId)}
-                  className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center space-x-2 transition-colors disabled:opacity-50"
+                  className="mac-btn-primary px-4 py-2 rounded-xl text-xs font-semibold gap-2 disabled:opacity-50"
                 >
                   {(submitting || isRunning) && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                   <span>{submitting || isRunning ? t('snapshots.savingButton') : t('snapshots.startSaveButton')}</span>
@@ -506,7 +570,7 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
                 <button
                   type="button"
                   onClick={loadSnapshots}
-                  className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center space-x-1"
+                  className="text-xs text-indigo-300 hover:text-indigo-200 flex items-center space-x-1"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${loadingList ? 'animate-spin' : ''}`} />
                   <span>{t('common.refresh')}</span>
@@ -514,17 +578,17 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
               </div>
 
               {readySnapshots.length === 0 ? (
-                <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 text-xs text-slate-400">
+                <div className="p-4 rounded-xl bg-white/[0.03] border border-white/[0.08] text-xs text-slate-400">
                   {t('snapshots.noRestoreSnapshots')}
                 </div>
               ) : (
                 <select
                   value={restoreSnapshotId}
                   onChange={(e) => setRestoreSnapshotId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm text-white focus:border-indigo-500 focus:outline-none"
+                  className="w-full px-3 py-2 rounded-xl mac-input text-sm"
                 >
                   {readySnapshots.map((s) => (
-                    <option key={s.id} value={s.id}>
+                    <option key={s.id} value={s.id} className="bg-slate-900 text-white">
                       {s.name} · {s.capture_mode === 'full_binary' ? t('snapshots.modeFullBinary') : t('snapshots.modeHybrid')} ·{' '}
                       {formatBytes(s.workspace_size_bytes)}
                     </option>
@@ -532,16 +596,16 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
                 </select>
               )}
 
-              <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 flex items-start space-x-2 text-xs text-slate-400">
+              <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.08] flex items-start space-x-2 text-xs text-slate-400">
                 <HardDrive className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
                 <span>{t('snapshots.restoreWarning')}</span>
               </div>
 
-              <div className="pt-2 flex items-center justify-end space-x-3 border-t border-slate-800">
+              <div className="pt-3 flex items-center justify-end space-x-3 border-t border-white/[0.07]">
                 <button
                   type="button"
                   onClick={onClose}
-                  className="px-4 py-2 rounded-lg text-xs text-slate-300 hover:bg-slate-800"
+                  className="mac-btn-secondary px-4 py-2 rounded-xl text-xs font-medium"
                 >
                   {t('common.close')}
                 </button>
@@ -549,7 +613,7 @@ export const SnapshotModal: React.FC<SnapshotModalProps> = ({
                   type="button"
                   onClick={() => handleRestore()}
                   disabled={submitting || isRunning || !restoreSnapshotId}
-                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center space-x-2 transition-colors disabled:opacity-50"
+                  className="px-4 py-2 rounded-xl bg-gradient-to-b from-emerald-500 to-emerald-600 hover:brightness-110 active:scale-[0.97] border border-emerald-300/30 shadow-[0_6px_20px_-6px_rgba(16,185,129,0.55),inset_0_1px_0_rgba(255,255,255,0.22)] text-white text-xs font-semibold flex items-center space-x-2 transition-all disabled:opacity-50"
                 >
                   {(submitting || isRunning) && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                   <span>
