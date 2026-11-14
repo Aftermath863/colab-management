@@ -55,7 +55,7 @@ Colab Manager macOS 桌面版采用**零第三方 Swift 依赖**的混合原生�
 | `⌘K` | 打开命令面板 | Raycast 风格 Liquid-Glass 模糊搜索（快捷操作、活跃实例、页面跳转、语言切换） |
 | `⌘N` | 新建计算实例 | 弹出 `NewSessionModal` 分配 Colab GPU/TPU/CPU 实例 |
 | `⇧⌘R` | 同步全部配额 | 立即轮询所有已绑定 Google 账号的 CCU 余额与状态 |
-| `⌘1` – `⌘6` | 主导航切换 | 在 Overview / Accounts / Sessions / Templates / Jobs / Notifications 间快速切换 |
+| `⌘1` – `⌘6` | 主导航切换 | 在 Overview (`⌘1`) / Sessions (`⌘2`) / Jobs (`⌘3`) / Accounts (`⌘4`) / Templates (`⌘5`) / Notifications (`⌘6`) 间快速切换 |
 | `⌘\` | 折叠/展开侧边栏 | 在完整侧边栏（`256px`）与紧凑图标栏（`68px`）间切换 |
 | `⌘L` | 打开守护日志 | 打开原生 `DaemonLogsWindow` 实时 tail `daemon.log`（支持复制、清屏、打开目录、重启守护进程） |
 | `⌃1` – `⌃4` | 切换工作台子标签 | 在实例工作台内切换 `Web 终端` / `文件管理 (/content)` / `代码编辑器` / `硬件监控` |
