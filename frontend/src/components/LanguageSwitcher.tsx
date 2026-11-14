@@ -1,6 +1,7 @@
 import React from 'react';
 import { Globe } from 'lucide-react';
 import { useI18n } from '../i18n';
+import { triggerHaptic } from '../desktop/macBridge';
 
 interface Props {
   className?: string;
@@ -9,24 +10,31 @@ interface Props {
 export const LanguageSwitcher: React.FC<Props> = ({ className = '' }) => {
   const { locale, setLocale, t } = useI18n();
 
+  const handleSelect = (next: 'zh' | 'en') => {
+    if (next !== locale) {
+      triggerHaptic('light');
+      setLocale(next);
+    }
+  };
+
   return (
     <div
       role="group"
       aria-label={t('common.languageSwitch')}
       title={t('common.languageSwitch')}
       data-testid="language-switcher"
-      className={`inline-flex items-center rounded-lg bg-slate-900/90 border border-slate-700/80 p-0.5 text-xs select-none shrink-0 ${className}`}
+      className={`mac-pill-group text-xs select-none shrink-0 gap-0.5 ${className}`}
     >
       <Globe className="w-3.5 h-3.5 text-slate-400 ml-1.5 mr-1 shrink-0" aria-hidden="true" />
       <button
         type="button"
         data-testid="lang-zh"
         aria-pressed={locale === 'zh'}
-        onClick={() => setLocale('zh')}
-        className={`px-2 py-1 rounded-md font-medium transition whitespace-nowrap ${
+        onClick={() => handleSelect('zh')}
+        className={`px-2.5 py-1 rounded-lg font-medium transition-all whitespace-nowrap ${
           locale === 'zh'
-            ? 'bg-blue-600 text-white shadow-sm'
-            : 'text-slate-400 hover:text-slate-200'
+            ? 'mac-pill-active text-white'
+            : 'text-slate-400 hover:text-slate-200 border border-transparent'
         }`}
       >
         {t('common.langZh')}
@@ -35,11 +43,11 @@ export const LanguageSwitcher: React.FC<Props> = ({ className = '' }) => {
         type="button"
         data-testid="lang-en"
         aria-pressed={locale === 'en'}
-        onClick={() => setLocale('en')}
-        className={`px-2 py-1 rounded-md font-medium transition whitespace-nowrap ${
+        onClick={() => handleSelect('en')}
+        className={`px-2.5 py-1 rounded-lg font-medium transition-all whitespace-nowrap ${
           locale === 'en'
-            ? 'bg-blue-600 text-white shadow-sm'
-            : 'text-slate-400 hover:text-slate-200'
+            ? 'mac-pill-active text-white'
+            : 'text-slate-400 hover:text-slate-200 border border-transparent'
         }`}
       >
         {t('common.langEn')}
