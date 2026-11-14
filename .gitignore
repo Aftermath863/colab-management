@@ -102,3 +102,11 @@ id_ecdsa*
 TEST_READY.md
 *.tsbuildinfo
 .master_key
+
+# --- macOS Desktop Build & Packaging Artifacts ---
+macos/.build/
+*.app/
+*.dmg
+*.iconset/
+*.icns
+dist/
