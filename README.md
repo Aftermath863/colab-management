@@ -91,12 +91,41 @@
 
 ---
 
+### 方式 C：macOS Apple Silicon 桌面应用 (`arm64` 原生壳)
+
+针对 Apple Silicon Mac（macOS 14.0+），项目提供原生 **SwiftUI / AppKit / WKWebView** 桌面端（`Colab Manager.app`）：
+
+- **Obsidian & Liquid Glass 美学**：无边框半透明毛玻璃主窗口（`NSVisualEffectView`）、Raycast 风格 `⌘K` 命令面板、触控板 Haptic 反馈、Finder 原生文件上传，以及一键拉起 `Terminal.app` / `Cursor` / `VS Code` Remote-SSH。
+- **Menu Bar Companion 菜单栏伴侣**：常驻顶部状态栏显示活跃 GPU 数与 CCU，支持在 Popover 面板中直达活跃实例、复制 SSH、同步配额与查看后台日志（关闭主窗口后自动后台驻留）。
+- **常用快捷键**：`⌘K`（命令面板）、`⌘N`（新建实例）、`⇧⌘R`（同步配额）、`⌘1`–`⌘6`（切换页面）、`⌘\`（折叠侧边栏）、`⌘L`（实时守护日志窗口）。
+- **本地数据存储**：桌面端数据与工作区隔离保存在 `~/Library/Application Support/ColabManager/data` 与 `~/Library/Application Support/ColabManager/workspace`。
+
+```bash
+# 构建并签名 dist/Colab Manager.app (Apple Silicon arm64)
+make macos-app
+
+# 打包可分发的 dist/Colab-Manager-macOS-arm64.dmg 安装镜像
+make macos-dmg
+
+# 启动桌面应用（若未构建则自动构建）
+make macos-run
+```
+
+> 详细架构、Bridge 协议、完整快捷键与打包指南请参阅 [**docs/MACOS_DESKTOP.md**](docs/MACOS_DESKTOP.md)。
+
+---
+
 ## 项目目录结构
 
 ```
 colab-management/
 ├── docs/
-│   └── ARCHITECTURE.md              # 权威系统架构设计与协议规范（端口 1113）
+│   ├── ARCHITECTURE.md              # 权威系统架构设计与协议规范（端口 1113）
+│   └── MACOS_DESKTOP.md             # macOS Apple Silicon 桌面端架构、快捷键与打包指南
+├── macos/                           # 原生 Apple Silicon SwiftUI / AppKit 桌面壳 (Package.swift)
+├── scripts/
+│   └── macos/                       # AppIcon 生成器、.app 组装签名与 .dmg 打包脚本
+├── Makefile                         # macos-app / macos-dmg / macos-run / test 快捷入口
 ├── backend/
 │   ├── app/
 │   │   ├── main.py                  # FastAPI 统一入口 (端口 1113)
